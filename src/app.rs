@@ -6,6 +6,7 @@ use crate::waveform::{render_waveform, ChannelMode, WaveformState};
 use crate::waveform_player::{start_waveform_thread, WaveformCommand, WaveformEvent};
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::{self, Color32, RichText};
+use egui_file_dialog::FileDialog;
 use std::path::Path;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -57,6 +58,9 @@ pub struct LoopEditorApp {
 
     // Paneel breedte (voor center_view_on_loop)
     pub last_panel_width: f32,
+
+    // File dialog (egui-native)
+    pub file_dialog: FileDialog,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -106,6 +110,15 @@ impl LoopEditorApp {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             last_panel_width: 800.0,
+            file_dialog: FileDialog::new().add_file_filter(
+                "Audio",
+                std::sync::Arc::new(|p: &std::path::Path| {
+                    matches!(
+                        p.extension().and_then(|s| s.to_str()),
+                        Some("mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma")
+                    )
+                }),
+            ),
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -1009,14 +1022,7 @@ impl eframe::App for LoopEditorApp {
                 .shortcuts
                 .is_pressed(ShortcutAction::OpenFile, &ctx.input(|i| i.clone()))
             {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a", "aac", "wma"])
-                    .pick_file()
-                {
-                    let path_str = path.to_string_lossy().to_string();
-                    self.file_path = path_str.clone();
-                    self.load_file(&path_str);
-                }
+                self.file_dialog.select_file();
             }
 
             // Undo
@@ -1123,15 +1129,8 @@ impl eframe::App for LoopEditorApp {
         egui::TopBottomPanel::top("file_toolbar").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if ui.button("📂 Open bestand").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a", "aac", "wma"])
-                        .pick_file()
-                    {
-                        let path_str = path.to_string_lossy().to_string();
-                        self.file_path = path_str.clone();
-                        self.load_file(&path_str);
-                    }
+                if ui.button("\u{1F4C2} Open bestand").clicked() {
+                    self.file_dialog.select_file();
                 }
 
                 // Kanaal modus dropdown
@@ -2027,6 +2026,15 @@ impl eframe::App for LoopEditorApp {
                         ui.separator();
                     }
                 });
+        }
+
+        // ── File dialog (egui-native, geen Windows COM issues) ──
+        self.file_dialog.update(ctx);
+
+        if let Some(path) = self.file_dialog.take_selected() {
+            let path_str = path.to_string_lossy().to_string();
+            self.file_path = path_str.clone();
+            self.load_file(&path_str);
         }
     }
 }
