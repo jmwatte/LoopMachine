@@ -59,6 +59,27 @@ impl Library {
             format!("{} - Loop {}", file_stem, count + 1)
         }
     }
+
+    /// Voeg een loop toe aan een track met een automatisch gegenereerde short_id.
+    /// Geeft het totale aantal loops in de track terug.
+    pub fn add_loop(&mut self, track_path: &str, saved: SavedLoop) -> usize {
+        // Verzamel bestaande IDs in deze track
+        let existing: Vec<String> = self
+            .tracks
+            .iter()
+            .filter(|t| t.track_path == track_path)
+            .flat_map(|t| &t.loops)
+            .filter_map(|l| l.short_id.clone())
+            .collect();
+
+        let mut saved = saved;
+        let new_id = crate::arrangement::generate_short_id(&existing);
+        saved.short_id = Some(new_id);
+
+        let track = self.track_for_path(track_path);
+        track.loops.push(saved);
+        track.loops.len()
+    }
 }
 
 /// Metadata voor één audiobestand.
@@ -74,6 +95,9 @@ pub struct TrackData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedLoop {
     pub label: String,
+    /// Korte identifier voor arranger (bv. "a", "b", "aa").
+    #[serde(default)]
+    pub short_id: Option<String>,
     pub loop_a_secs: f32,
     pub loop_b_secs: f32,
     /// Aantal halve tonen pitch-shift.
@@ -99,10 +123,12 @@ const LIBRARY_FILE: &str = "library.json";
 const OLD_LOOPS_FILE: &str = "loops.json";
 
 /// Laad de bibliotheek van schijf. Migreert oude loops.json indien nodig.
+/// Wist kort nadien bestaande loops zonder short_id een ID toe.
 pub fn load_library() -> Library {
     // Probeer nieuwe format eerst
     if let Ok(json) = std::fs::read_to_string(LIBRARY_FILE) {
-        if let Ok(lib) = serde_json::from_str(&json) {
+        if let Ok(mut lib) = serde_json::from_str::<Library>(&json) {
+            assign_short_ids(&mut lib);
             return lib;
         }
     }
@@ -115,6 +141,7 @@ pub fn load_library() -> Library {
                 let track = lib.track_for_path(&old.track_path);
                 track.loops.push(SavedLoop {
                     label: old.label,
+                    short_id: None,
                     loop_a_secs: old.loop_a_secs,
                     loop_b_secs: old.loop_b_secs,
                     pitch_semitones: old.pitch_semitones,
@@ -123,6 +150,7 @@ pub fn load_library() -> Library {
                 });
             }
             // Sla nieuwe format meteen op
+            assign_short_ids(&mut lib);
             save_library(&lib);
             // Verwijder oud bestand (optioneel, maar netjes)
             let _ = std::fs::remove_file(OLD_LOOPS_FILE);
@@ -137,6 +165,38 @@ pub fn load_library() -> Library {
 pub fn save_library(library: &Library) {
     if let Ok(json) = serde_json::to_string_pretty(library) {
         let _ = std::fs::write(LIBRARY_FILE, json);
+    }
+}
+
+/// Ken aan alle loops zonder short_id een unieke ID toe.
+pub fn assign_short_ids(lib: &mut Library) {
+    let mut changed = false;
+    for track in &mut lib.tracks {
+        // Reset: verzamel alle IDs en vervang dubbele
+        let ids: Vec<Option<String>> = track.loops.iter().map(|l| l.short_id.clone()).collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut existing: Vec<String> = Vec::new();
+
+        for (i, id_opt) in ids.iter().enumerate() {
+            let needs_new = match id_opt {
+                Some(id) if !seen.contains(id) => {
+                    seen.insert(id.clone());
+                    existing.push(id.clone());
+                    false
+                }
+                _ => true, // None of duplicate
+            };
+
+            if needs_new {
+                let new_id = crate::arrangement::generate_short_id(&existing);
+                track.loops[i].short_id = Some(new_id.clone());
+                existing.push(new_id);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        save_library(lib);
     }
 }
 

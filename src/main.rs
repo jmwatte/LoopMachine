@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod arrangement;
 mod chroma;
 mod loops;
 mod session;

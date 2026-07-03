@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::arrangement::SequenceStep;
+
 pub enum WaveformCommand {
     Play {
         samples: Arc<Vec<f32>>,
@@ -33,6 +35,12 @@ pub enum WaveformCommand {
     SetTempo(f32),
     SetVolume(f32),
     SetLoopEnabled(bool),
+    /// Speel een hele sequentie in één keer af (gapless, fire & forget).
+    PlaySequence {
+        sequence_steps: Vec<SequenceStep>,
+        pitch_semitones: Arc<AtomicU32>,
+        tempo: Arc<AtomicU32>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +51,12 @@ pub enum WaveformEvent {
     Resumed,
     Error(String),
     Position(f32, f32),
+    /// Audio thread is naar een nieuwe stap in een arrangement gesprongen.
+    StepChanged(usize),
+    /// Audio thread herhaalt een stap opnieuw.
+    StepRepeated(usize),
+    /// Hele arrangement is klaar.
+    ArrangementFinished,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -316,6 +330,49 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                 WaveformCommand::SetLoopEnabled(enabled) => {
                     loop_bounds.lock().unwrap().enabled = enabled;
                 }
+                WaveformCommand::PlaySequence {
+                    sequence_steps,
+                    pitch_semitones: ps,
+                    tempo: t,
+                } => {
+                    if sequence_steps.is_empty() {
+                        continue;
+                    }
+
+                    pitch_semitones.store(ps.load(Ordering::Relaxed), Ordering::Relaxed);
+                    tempo.store(t.load(Ordering::Relaxed), Ordering::Relaxed);
+
+                    if !check_and_recreate_stream(
+                        &mut _stream,
+                        &mut sink,
+                        &event_tx,
+                        &mut last_audio_activity,
+                        &mut stream_is_dead,
+                    ) {
+                        continue;
+                    }
+
+                    let source = SequenceSource::new(
+                        sequence_steps,
+                        pitch_semitones.clone(),
+                        tempo.clone(),
+                        source_pos.clone(),
+                        volume.clone(),
+                        event_tx.clone(),
+                    );
+
+                    if let Some(s) = &sink {
+                        s.stop();
+                        s.clear();
+                        s.append(source);
+                        s.play();
+                        is_playing = true;
+                        is_paused = false;
+                        stuck_frames = 0;
+                        last_source_pos = source_pos.load(Ordering::Relaxed);
+                        let _ = event_tx.send(WaveformEvent::Playing);
+                    }
+                }
             }
         }
 
@@ -398,6 +455,219 @@ struct SoundTouchSource {
     cached_loop_dur: f64,
     current_audio_pos: f64,
 }
+
+// ───────────────────────────────────────────────
+// SequenceSource — voor arrangement playback
+// ───────────────────────────────────────────────
+
+struct SequenceSource {
+    /// Huidige samples (kunnen wisselen per stap)
+    raw_samples: Arc<Vec<f32>>,
+    /// De hele sequentie
+    sequence: Vec<SequenceStep>,
+    /// Huidige stap index
+    current_step_idx: usize,
+    /// Huidige read positie in raw_samples
+    read_pos: usize,
+    sample_rate: u32,
+    pitch_semitones: Arc<AtomicU32>,
+    tempo: Arc<AtomicU32>,
+    source_pos: Arc<AtomicU64>,
+    volume: Arc<AtomicU32>,
+    ts: TimeStretch,
+    out_buf: Vec<f32>,
+    out_idx: usize,
+    current_pitch: f32,
+    current_tempo: f32,
+    cached_tempo: f64,
+    current_audio_pos: f64,
+    /// Kanaal om events terug naar UI te sturen
+    step_event_tx: Sender<WaveformEvent>,
+}
+
+impl SequenceSource {
+    fn new(
+        sequence: Vec<SequenceStep>,
+        pitch_semitones: Arc<AtomicU32>,
+        tempo: Arc<AtomicU32>,
+        source_pos: Arc<AtomicU64>,
+        volume: Arc<AtomicU32>,
+        step_event_tx: Sender<WaveformEvent>,
+    ) -> Self {
+        let first = sequence[0].clone();
+        let total_frames = first.samples.len();
+
+        let mut ts = TimeStretch::new(first.sample_rate, 1, total_frames);
+        let initial_pitch = f32::from_bits(pitch_semitones.load(Ordering::Relaxed));
+        let initial_tempo = f32::from_bits(tempo.load(Ordering::Relaxed));
+        ts.set_speed(initial_tempo);
+        ts.set_pitch_semitones(initial_pitch);
+
+        let start_pos = first.start_sample;
+        let sr = first.sample_rate;
+        source_pos.store(f64::to_bits(start_pos as f64), Ordering::Relaxed);
+
+        Self {
+            raw_samples: first.samples.clone(),
+            sequence,
+            current_step_idx: 0,
+            read_pos: start_pos,
+            sample_rate: sr,
+            pitch_semitones,
+            tempo,
+            source_pos,
+            volume,
+            ts,
+            out_buf: Vec::with_capacity(4096),
+            out_idx: 0,
+            current_pitch: initial_pitch,
+            current_tempo: initial_tempo,
+            cached_tempo: initial_tempo as f64,
+            current_audio_pos: start_pos as f64,
+            step_event_tx,
+        }
+    }
+
+    fn fill_buffer(&mut self) {
+        // Check of pitch/tempo is gewijzigd
+        let new_pitch = f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed));
+        let new_tempo = f32::from_bits(self.tempo.load(Ordering::Relaxed));
+
+        if (new_pitch - self.current_pitch).abs() > 0.01 {
+            self.ts.set_pitch_semitones(new_pitch);
+            self.current_pitch = new_pitch;
+        }
+        if (new_tempo - self.current_tempo).abs() > 0.01 {
+            self.ts.set_speed(new_tempo);
+            self.current_tempo = new_tempo;
+            self.cached_tempo = new_tempo as f64;
+        }
+
+        self.out_buf.clear();
+        self.out_idx = 0;
+
+        let target_out = 4096;
+        let mut input_chunk = Vec::with_capacity(4096);
+
+        while self.out_buf.len() < target_out {
+            // Huidige stap ophalen
+            let step = &self.sequence[self.current_step_idx];
+
+            input_chunk.clear();
+
+            // Samples inlezen van huidige read_pos tot einde van deze loop
+            while input_chunk.len() < 4096 {
+                if self.read_pos >= step.end_sample {
+                    break;
+                }
+                let to_read = (4096 - input_chunk.len()).min(step.end_sample - self.read_pos);
+                input_chunk
+                    .extend_from_slice(&self.raw_samples[self.read_pos..self.read_pos + to_read]);
+                self.read_pos += to_read;
+            }
+
+            if input_chunk.is_empty() {
+                // Geen input meer → verwerk herhalingen of volgende stap
+                let step_idx = self.current_step_idx;
+                let repeats = self.sequence[step_idx].repeats;
+                if repeats > 1 {
+                    self.sequence[step_idx].repeats -= 1;
+                    self.read_pos = self.sequence[step_idx].start_sample;
+                    let _ = self
+                        .step_event_tx
+                        .send(WaveformEvent::StepRepeated(step_idx));
+                    continue;
+                }
+                if step_idx + 1 < self.sequence.len() {
+                    self.current_step_idx += 1;
+                    let next_idx = self.current_step_idx;
+                    self.raw_samples = self.sequence[next_idx].samples.clone();
+                    self.read_pos = self.sequence[next_idx].start_sample;
+                    self.sample_rate = self.sequence[next_idx].sample_rate;
+                    self.ts.clear();
+                    let _ = self
+                        .step_event_tx
+                        .send(WaveformEvent::StepChanged(next_idx));
+                    continue;
+                }
+                // Einde arrangement
+                let _ = self.step_event_tx.send(WaveformEvent::ArrangementFinished);
+                // Flush wat er nog in TimeStretch zit
+                let mut flush_buf = vec![0.0; 4096];
+                let received = self.ts.receive_samples(&mut flush_buf, 4096);
+                if received > 0 {
+                    self.out_buf.extend_from_slice(&flush_buf[..received]);
+                }
+                break;
+            }
+
+            // Verwerk via TimeStretch
+            self.ts.put_samples(&input_chunk, input_chunk.len());
+
+            let mut temp_out = vec![0.0; 4096];
+            loop {
+                let received = self.ts.receive_samples(&mut temp_out, 4096);
+                if received == 0 {
+                    break;
+                }
+                self.out_buf.extend_from_slice(&temp_out[..received]);
+            }
+        }
+    }
+}
+
+impl Iterator for SequenceSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        if self.out_idx >= self.out_buf.len() {
+            self.fill_buffer();
+            if self.out_buf.is_empty() {
+                return None;
+            }
+        }
+
+        if self.out_idx < self.out_buf.len() {
+            let raw_val = self.out_buf[self.out_idx];
+            let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
+            let mut val = raw_val * vol;
+            // Soft-clip limiter
+            if val > 1.0 {
+                val = 1.0 - 1.0 / (val + 1.0);
+            } else if val < -1.0 {
+                val = -1.0 + 1.0 / (-val + 1.0);
+            }
+            self.out_idx += 1;
+
+            self.current_audio_pos += self.cached_tempo;
+            self.source_pos
+                .store(f64::to_bits(self.current_audio_pos), Ordering::Relaxed);
+
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
+impl Source for SequenceSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(usize::MAX)
+    }
+    fn channels(&self) -> u16 {
+        1
+    }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+// ───────────────────────────────────────────────
+// SoundTouchSource — voor enkele loop playback
+// ───────────────────────────────────────────────
 
 impl SoundTouchSource {
     fn new(
