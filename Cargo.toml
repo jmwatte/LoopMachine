@@ -40,6 +40,9 @@ rustfft = "6.4"
 # --- File dialog (egui-native, compatibel met egui 0.28) ---
 egui-file-dialog = "0.6"
 
+# --- Audio encoding (export) ---
+hound = "3.5"
+
 [build-dependencies]
 cc = "1.0"
 embed-resource = "3.0"

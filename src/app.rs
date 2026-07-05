@@ -8,9 +8,50 @@ use crate::waveform_player::{start_waveform_thread, WaveformCommand, WaveformEve
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::FileDialog;
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::Path;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+
+// ───────────────────────────────────────────────
+// Export types
+// ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportMode {
+    Separate,
+    Combined,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportFormat {
+    Wav,
+}
+
+/// State collected when user clicks "Export" — held while the file dialog is open.
+#[derive(Clone)]
+struct ExportParams {
+    loops: Vec<crate::loops::SavedLoop>,
+    base_name: String,
+    mode: ExportMode,
+    #[allow(dead_code)]
+    format: ExportFormat,
+    sample_rate: u32,
+    samples: std::sync::Arc<Vec<f32>>,
+}
+
+#[derive(Clone)]
+struct ExportState {
+    show_window: bool,
+    selected: Vec<bool>,
+    base_name: String,
+    mode: ExportMode,
+    format: ExportFormat,
+    /// Cache of (label, a_secs, b_secs) populated once when window opens,
+    /// avoids cloning the full SavedLoop vector every frame.
+    cached_loop_info: Vec<(String, f32, f32)>,
+}
 
 pub struct LoopEditorApp {
     // Waveform state
@@ -69,6 +110,11 @@ pub struct LoopEditorApp {
     pub arrangements: Vec<Arrangement>,
     pub arr_current_step: Option<usize>,
     pub arr_parse_buf: String,
+
+    // Export
+    export_state: ExportState,
+    export_dialog: FileDialog,
+    export_pending: Option<ExportParams>,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -132,6 +178,23 @@ impl LoopEditorApp {
             arrangements: crate::arrangement::load_arrangements(),
             arr_current_step: None,
             arr_parse_buf: String::new(),
+            export_state: ExportState {
+                show_window: false,
+                selected: Vec::new(),
+                base_name: "audiotrack_loops".to_string(),
+                mode: ExportMode::Combined,
+                format: ExportFormat::Wav,
+                cached_loop_info: Vec::new(),
+            },
+            export_dialog: FileDialog::new()
+                .add_file_filter(
+                    "WAV Audio (*.wav)",
+                    std::sync::Arc::new(|p: &std::path::Path| {
+                        p.extension().and_then(|s| s.to_str()) == Some("wav")
+                    }),
+                )
+                .title("Exporteer loops"),
+            export_pending: None,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -416,6 +479,161 @@ impl LoopEditorApp {
                     .min((self.waveform_state.duration_secs - visible_secs).max(0.0));
             }
         }
+    }
+
+    // ───────────────────────────────────────────────
+    // Export logic
+    // ───────────────────────────────────────────────
+
+    fn open_export_window(&mut self) {
+        let track_path = match self.waveform_state.path.clone() {
+            Some(p) => p,
+            None => return,
+        };
+        let track = self.library.track_for_path(&track_path);
+        let count = track.loops.len();
+
+        self.export_state.selected = vec![false; count];
+        self.export_state.base_name = "audiotrack_loops".to_string();
+        self.export_state.cached_loop_info = track
+            .loops
+            .iter()
+            .map(|l| (l.label.clone(), l.loop_a_secs, l.loop_b_secs))
+            .collect();
+        self.export_state.show_window = true;
+    }
+
+    fn write_wav(path: &std::path::Path, samples: &[f32], sample_rate: u32) -> Result<(), String> {
+        if samples.is_empty() {
+            return Err("Geen samples om te schrijven".to_string());
+        }
+        let samples_i16: Vec<i16> = samples
+            .iter()
+            .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+            .collect();
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let file = File::create(path)
+            .map_err(|e| format!("Kon bestand niet aanmaken '{}': {}", path.display(), e))?;
+        let mut writer = hound::WavWriter::new(BufWriter::new(file), spec)
+            .map_err(|e| format!("Fout bij initialiseren WAV: {}", e))?;
+
+        for &sample in &samples_i16 {
+            writer
+                .write_sample(sample)
+                .map_err(|e| format!("Fout bij schrijven sample: {}", e))?;
+        }
+        writer
+            .finalize()
+            .map_err(|e| format!("Fout bij afsluiten WAV: {}", e))?;
+        Ok(())
+    }
+
+    fn execute_export(
+        &self,
+        params: &ExportParams,
+        target: &std::path::Path,
+    ) -> Result<String, String> {
+        match params.mode {
+            ExportMode::Combined => self.export_combined(params, target),
+            ExportMode::Separate => self.export_separate(params, target),
+        }
+    }
+
+    fn export_combined(
+        &self,
+        params: &ExportParams,
+        path: &std::path::Path,
+    ) -> Result<String, String> {
+        let mut all_samples: Vec<f32> = Vec::new();
+        let sr = params.sample_rate as f32;
+
+        let sample_len = params.samples.len();
+        for saved in &params.loops {
+            let from = (saved.loop_a_secs * sr) as usize;
+            let to = (saved.loop_b_secs * sr) as usize;
+            if to > from && from < sample_len {
+                let safe_to = to.min(sample_len);
+                all_samples.extend_from_slice(&params.samples[from..safe_to]);
+            }
+        }
+
+        if all_samples.is_empty() {
+            return Err("Geen samples om te exporteren (ongeldige loop ranges?)".to_string());
+        }
+
+        Self::write_wav(path, &all_samples, params.sample_rate)?;
+
+        let total_secs = all_samples.len() as f32 / params.sample_rate as f32;
+        Ok(format!(
+            "✅ {} loops gecombineerd \u{2192} '{}' ({:.1}s)",
+            params.loops.len(),
+            path.file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default(),
+            total_secs,
+        ))
+    }
+
+    fn export_separate(
+        &self,
+        params: &ExportParams,
+        dir: &std::path::Path,
+    ) -> Result<String, String> {
+        let sr = params.sample_rate as f32;
+        let sample_len = params.samples.len();
+        let mut count = 0usize;
+
+        for saved in &params.loops {
+            // Build a filesystem-safe slug from the loop label
+            let label_slug: String = saved
+                .label
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            // Edge case: slug is all underscores or empty
+            let final_slug = if label_slug.trim_matches('_').is_empty() {
+                format!("loop_{}", count + 1)
+            } else {
+                label_slug
+            };
+
+            // Prevent overwriting existing files — auto-append counter
+            let mut file_name = format!("{}_{}.wav", params.base_name, final_slug);
+            let mut path = dir.join(&file_name);
+            let mut counter = 1usize;
+            while path.exists() {
+                file_name = format!("{}_{}_{:03}.wav", params.base_name, final_slug, counter);
+                path = dir.join(&file_name);
+                counter += 1;
+            }
+
+            let from = (saved.loop_a_secs * sr) as usize;
+            let to = (saved.loop_b_secs * sr) as usize;
+            if to > from && from < sample_len {
+                let safe_to = to.min(sample_len);
+                Self::write_wav(&path, &params.samples[from..safe_to], params.sample_rate)?;
+                count += 1;
+            }
+        }
+
+        Ok(format!(
+            "✅ {} loops geëxporteerd naar '{}'",
+            count,
+            dir.display(),
+        ))
     }
 
     /// Toon de arranger window UI.
@@ -1588,6 +1806,26 @@ impl eframe::App for LoopEditorApp {
                     }
                 }
             }
+
+            // ExportLoops — open export window
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ExportLoops, &ctx.input(|i| i.clone()))
+            {
+                if self.waveform_state.path.is_some() {
+                    let track_path = self.waveform_state.path.as_ref().unwrap();
+                    let track = self.library.track_for_path(track_path);
+                    if track.loops.is_empty() {
+                        self.status_message = "Geen opgeslagen loops voor deze track".to_string();
+                        self.status_message_timer = 3 * 60;
+                    } else {
+                        self.open_export_window();
+                    }
+                } else {
+                    self.status_message = "Geen audiobestand geladen".to_string();
+                    self.status_message_timer = 3 * 60;
+                }
+            }
         }
         // ── Drag & drop bestanden ──
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
@@ -1675,6 +1913,24 @@ impl eframe::App for LoopEditorApp {
                         );
                     });
                 }
+
+                // ── Export button ──
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.waveform_state.path.is_some() {
+                        let track = self
+                            .library
+                            .track_for_path(self.waveform_state.path.as_ref().unwrap());
+                        if !track.loops.is_empty() {
+                            if ui
+                                .button("\u{1F4E4} Export")
+                                .on_hover_text("Exporteer loops naar WAV (Ctrl+E)")
+                                .clicked()
+                            {
+                                self.open_export_window();
+                            }
+                        }
+                    }
+                });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("ARR").clicked() {
@@ -2525,6 +2781,208 @@ impl eframe::App for LoopEditorApp {
             let path_str = path.to_string_lossy().to_string();
             self.file_path = path_str.clone();
             self.load_file(&path_str);
+        }
+
+        // ── Export Window ──
+        if self.export_state.show_window {
+            let track_path = match self.waveform_state.path.clone() {
+                Some(p) => p,
+                None => {
+                    self.export_state.show_window = false;
+                    return;
+                }
+            };
+            let track = self.library.track_for_path(&track_path);
+            let total = track.loops.len();
+            let track_label = track.label.clone();
+            let track_loops: Vec<crate::loops::SavedLoop> = track.loops.clone();
+
+            // Keep selected vector in sync with track.loops
+            if self.export_state.selected.len() != total {
+                self.export_state.selected = vec![false; total];
+            }
+
+            // Flag to open the file dialog after the window closure
+            let mut will_export = false;
+            let mut will_export_mode = ExportMode::Combined;
+
+            egui::Window::new("\u{1F4E4} Export Loops")
+                .id(egui::Id::new("export_window"))
+                .resizable(true)
+                .default_size([500.0, 420.0])
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!("\u{1F3B5} {}", track_label))
+                                .size(14.0)
+                                .strong(),
+                        );
+                        ui.separator();
+
+                        // ── Select / Deselect All ──
+                        ui.horizontal(|ui| {
+                            if ui.button("Select All").clicked() {
+                                for s in &mut self.export_state.selected {
+                                    *s = true;
+                                }
+                            }
+                            if ui.button("Deselect All").clicked() {
+                                for s in &mut self.export_state.selected {
+                                    *s = false;
+                                }
+                            }
+                        });
+                        ui.separator();
+
+                        // ── Loop list with checkboxes ──
+                        ui.label(RichText::new("Selecteer loops:").size(13.0).strong());
+                        for (i, (label, a, b)) in
+                            self.export_state.cached_loop_info.iter().enumerate()
+                        {
+                            if i >= self.export_state.selected.len() {
+                                break;
+                            }
+                            let checked = &mut self.export_state.selected[i];
+                            let time_str = format!(
+                                "{:02}:{:02} \u{2192} {:02}:{:02}",
+                                (*a / 60.0) as u32,
+                                *a as u32 % 60,
+                                (*b / 60.0) as u32,
+                                *b as u32 % 60,
+                            );
+                            ui.checkbox(checked, format!("{}  ({})", label, time_str));
+                        }
+
+                        ui.separator();
+
+                        // ── Settings ──
+                        ui.label(RichText::new("Instellingen:").size(13.0).strong());
+
+                        ui.horizontal(|ui| {
+                            ui.label("Basis naam:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.export_state.base_name)
+                                    .desired_width(250.0),
+                            );
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Formaat:");
+                            let fmt = &mut self.export_state.format;
+                            egui::ComboBox::from_id_source("export_format")
+                                .selected_text("WAV (.wav)")
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(*fmt == ExportFormat::Wav, "WAV (.wav)")
+                                        .clicked()
+                                    {
+                                        *fmt = ExportFormat::Wav;
+                                    }
+                                });
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Modus:");
+                            let mode = &mut self.export_state.mode;
+                            ui.radio_value(mode, ExportMode::Combined, "Gecombineerd bestand");
+                            ui.radio_value(mode, ExportMode::Separate, "Aparte bestanden");
+                        });
+
+                        ui.separator();
+
+                        // ── Export button ──
+                        let selected_count =
+                            self.export_state.selected.iter().filter(|&&s| s).count();
+                        let can_export = selected_count > 0;
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Annuleren").clicked() {
+                                self.export_state.show_window = false;
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let btn_text = format!(
+                                        "\u{1F4E4} Export ({} loop{})",
+                                        selected_count,
+                                        if selected_count != 1 { "s" } else { "" }
+                                    );
+                                    let btn = egui::Button::new(RichText::new(btn_text).size(14.0));
+                                    let resp = ui.add_enabled(can_export, btn);
+                                    if can_export && resp.clicked() {
+                                        // Collect selected loops
+                                        let selected_loops: Vec<crate::loops::SavedLoop> = self
+                                            .export_state
+                                            .selected
+                                            .iter()
+                                            .zip(track_loops.iter())
+                                            .filter(|(sel, _)| **sel)
+                                            .map(|(_, l)| l.clone())
+                                            .collect();
+
+                                        let params = ExportParams {
+                                            loops: selected_loops,
+                                            base_name: self.export_state.base_name.clone(),
+                                            mode: self.export_state.mode,
+                                            format: self.export_state.format,
+                                            sample_rate: self.waveform_state.sample_rate,
+                                            samples: self.waveform_state.samples.clone(),
+                                        };
+                                        self.export_pending = Some(params);
+                                        self.export_state.show_window = false;
+                                        will_export = true;
+                                        will_export_mode = self.export_state.mode;
+                                    }
+                                },
+                            );
+                        });
+                    });
+                });
+
+            // Open file dialog after the window closure (avoids borrow conflicts)
+            if will_export {
+                match will_export_mode {
+                    ExportMode::Combined => {
+                        self.export_dialog.save_file();
+                    }
+                    ExportMode::Separate => {
+                        self.export_dialog.select_directory();
+                    }
+                }
+            }
+        }
+
+        // ── Export dialog processing ──
+        self.export_dialog.update(ctx);
+
+        if self.export_pending.is_some() {
+            let mode = self.export_pending.as_ref().unwrap().mode;
+            let path_opt = match mode {
+                ExportMode::Combined => self.export_dialog.take_selected(),
+                ExportMode::Separate => self.export_dialog.take_selected(),
+            };
+
+            if path_opt.is_some() {
+                // User confirmed — handled below
+            } else if self.export_dialog.state() != egui_file_dialog::DialogState::Open {
+                // Dialog was closed without selection
+                self.export_pending = None;
+            }
+
+            if let Some(path) = path_opt {
+                let params = self.export_pending.take().unwrap();
+                let result = self.execute_export(&params, &path);
+                match result {
+                    Ok(msg) => {
+                        self.status_message = msg;
+                        self.status_message_timer = 6 * 60;
+                    }
+                    Err(e) => {
+                        self.status_message = format!("\u{26A0} Export mislukt: {}", e);
+                        self.status_message_timer = 6 * 60;
+                    }
+                }
+            }
         }
 
         // ── Arranger window ──

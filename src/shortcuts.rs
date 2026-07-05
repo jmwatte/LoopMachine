@@ -53,6 +53,9 @@ pub enum ShortcutAction {
     Undo,
     Redo,
     RestartLoop,
+
+    // Export
+    ExportLoops,
 }
 
 impl ShortcutAction {
@@ -90,6 +93,7 @@ impl ShortcutAction {
             Self::Undo => "Undo",
             Self::Redo => "Redo",
             Self::RestartLoop => "Restart loop (seek to A & play)",
+            Self::ExportLoops => "Export loops...",
         }
     }
 
@@ -119,6 +123,7 @@ impl ShortcutAction {
             Self::ZoomIn | Self::ZoomOut | Self::ResetZoom | Self::ShowShortcuts => "View",
             Self::OpenFile => "File",
             Self::Undo | Self::Redo | Self::RestartLoop => "Edit",
+            Self::ExportLoops => "File",
         }
     }
 
@@ -156,6 +161,7 @@ impl ShortcutAction {
             Self::RestartLoop,
             Self::CenterLoop,
             Self::SaveLoop,
+            Self::ExportLoops,
         ]
     }
 }
@@ -569,6 +575,10 @@ impl Default for ShortcutsConfig {
         bindings.insert(
             ShortcutAction::SaveLoop,
             KeyBinding::new(SerializableKey::S).with_ctrl(),
+        );
+        bindings.insert(
+            ShortcutAction::ExportLoops,
+            KeyBinding::new(SerializableKey::E).with_ctrl(),
         );
 
         Self {
