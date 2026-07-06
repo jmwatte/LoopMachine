@@ -239,13 +239,27 @@ pub struct SequenceStep {
 const ARRANGEMENTS_FILE: &str = "arrangements.json";
 
 /// Laad arrangementen van schijf.
+/// Laad arrangementen van schijf. Kleurt alle stappen die nog de default grijze kleur
+/// hebben opnieuw in via de hash van track_path + loop_id.
 pub fn load_arrangements() -> Vec<Arrangement> {
     if let Ok(json) = std::fs::read_to_string(ARRANGEMENTS_FILE) {
-        if let Ok(arr) = serde_json::from_str(&json) {
+        if let Ok(mut arr) = serde_json::from_str::<Vec<Arrangement>>(&json) {
+            fixup_colors(&mut arr);
             return arr;
         }
     }
     Vec::new()
+}
+
+/// Vervang default grijze kleuren door gehashte kleuren op basis van track + loop_id.
+fn fixup_colors(arrangements: &mut [Arrangement]) {
+    for arr in arrangements {
+        for step in &mut arr.steps {
+            if step.color == [128; 3] {
+                step.color = color_for_arranger(&step.loop_id, &step.track_path);
+            }
+        }
+    }
 }
 
 /// Sla arrangementen weg naar schijf.
