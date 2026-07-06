@@ -432,6 +432,74 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
     }
 }
 
+// ───────────────────────────────────────────────
+// Gedeelde hulpfuncties voor SoundTouchSource en SequenceSource
+// ───────────────────────────────────────────────
+
+/// Update pitch en tempo vanuit atomic variabelen als ze gewijzigd zijn.
+fn update_pitch_tempo(
+    ts: &mut TimeStretch,
+    pitch_semitones: &Arc<AtomicU32>,
+    tempo: &Arc<AtomicU32>,
+    current_pitch: &mut f32,
+    current_tempo: &mut f32,
+    cached_tempo: &mut f64,
+) {
+    let new_pitch = f32::from_bits(pitch_semitones.load(Ordering::Relaxed));
+    let new_tempo = f32::from_bits(tempo.load(Ordering::Relaxed));
+    if (new_pitch - *current_pitch).abs() > 0.01 {
+        ts.set_pitch_semitones(new_pitch);
+        *current_pitch = new_pitch;
+    }
+    if (new_tempo - *current_tempo).abs() > 0.01 {
+        ts.set_speed(new_tempo);
+        *current_tempo = new_tempo;
+        *cached_tempo = new_tempo as f64;
+    }
+}
+
+/// Voer input_chunk door TimeStretch en verzamel output in out_buf.
+/// temp_out wordt herbruikt als scratch-buffer.
+fn process_through_timestretch(
+    ts: &mut TimeStretch,
+    input_chunk: &[f32],
+    out_buf: &mut Vec<f32>,
+    temp_out: &mut Vec<f32>,
+) {
+    ts.put_samples(input_chunk, input_chunk.len());
+    loop {
+        let received = ts.receive_samples(temp_out, 4096);
+        if received == 0 {
+            break;
+        }
+        out_buf.extend_from_slice(&temp_out[..received]);
+    }
+}
+
+/// Flush wat er nog in TimeStretch zit na einde van de input.
+fn flush_timestretch(
+    ts: &mut TimeStretch,
+    out_buf: &mut Vec<f32>,
+    flush_buf: &mut Vec<f32>,
+) {
+    let received = ts.receive_samples(flush_buf, 4096);
+    if received > 0 {
+        out_buf.extend_from_slice(&flush_buf[..received]);
+    }
+}
+
+/// Volume toepassen met soft-clip limiter.
+fn apply_volume_soft_clip(raw_val: f32, volume: &Arc<AtomicU32>) -> f32 {
+    let vol = f32::from_bits(volume.load(Ordering::Relaxed));
+    let mut val = raw_val * vol;
+    if val > 1.0 {
+        val = 1.0 - 1.0 / (val + 1.0);
+    } else if val < -1.0 {
+        val = -1.0 + 1.0 / (-val + 1.0);
+    }
+    val
+}
+
 struct SoundTouchSource {
     raw_samples: Arc<Vec<f32>>,
     sample_rate: u32,
@@ -540,19 +608,14 @@ impl SequenceSource {
     }
 
     fn fill_buffer(&mut self) {
-        // Check of pitch/tempo is gewijzigd
-        let new_pitch = f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed));
-        let new_tempo = f32::from_bits(self.tempo.load(Ordering::Relaxed));
-
-        if (new_pitch - self.current_pitch).abs() > 0.01 {
-            self.ts.set_pitch_semitones(new_pitch);
-            self.current_pitch = new_pitch;
-        }
-        if (new_tempo - self.current_tempo).abs() > 0.01 {
-            self.ts.set_speed(new_tempo);
-            self.current_tempo = new_tempo;
-            self.cached_tempo = new_tempo as f64;
-        }
+        update_pitch_tempo(
+            &mut self.ts,
+            &self.pitch_semitones,
+            &self.tempo,
+            &mut self.current_pitch,
+            &mut self.current_tempo,
+            &mut self.cached_tempo,
+        );
 
         self.out_buf.clear();
         self.out_idx = 0;
@@ -603,25 +666,20 @@ impl SequenceSource {
                 }
                 // Einde arrangement
                 let _ = self.step_event_tx.send(WaveformEvent::ArrangementFinished);
-                // Flush wat er nog in TimeStretch zit
-                let received = self.ts.receive_samples(&mut self.flush_buf, 4096);
-                if received > 0 {
-                    self.out_buf.extend_from_slice(&self.flush_buf[..received]);
-                }
+                flush_timestretch(
+                    &mut self.ts,
+                    &mut self.out_buf,
+                    &mut self.flush_buf,
+                );
                 break;
             }
 
-            // Verwerk via TimeStretch
-            self.ts
-                .put_samples(&self.input_chunk, self.input_chunk.len());
-
-            loop {
-                let received = self.ts.receive_samples(&mut self.temp_out, 4096);
-                if received == 0 {
-                    break;
-                }
-                self.out_buf.extend_from_slice(&self.temp_out[..received]);
-            }
+            process_through_timestretch(
+                &mut self.ts,
+                &self.input_chunk,
+                &mut self.out_buf,
+                &mut self.temp_out,
+            );
         }
     }
 }
@@ -639,14 +697,7 @@ impl Iterator for SequenceSource {
 
         if self.out_idx < self.out_buf.len() {
             let raw_val = self.out_buf[self.out_idx];
-            let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
-            let mut val = raw_val * vol;
-            // Soft-clip limiter
-            if val > 1.0 {
-                val = 1.0 - 1.0 / (val + 1.0);
-            } else if val < -1.0 {
-                val = -1.0 + 1.0 / (-val + 1.0);
-            }
+            let val = apply_volume_soft_clip(raw_val, &self.volume);
             self.out_idx += 1;
 
             self.current_audio_pos += self.cached_tempo;
@@ -755,19 +806,14 @@ impl SoundTouchSource {
             self.out_idx = 0;
         }
 
-        // 2. Check of UI parameters heeft gewijzigd
-        let new_pitch = f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed));
-        let new_tempo = f32::from_bits(self.tempo.load(Ordering::Relaxed));
-
-        if (new_pitch - self.current_pitch).abs() > 0.01 {
-            self.ts.set_pitch_semitones(new_pitch);
-            self.current_pitch = new_pitch;
-        }
-        if (new_tempo - self.current_tempo).abs() > 0.01 {
-            self.ts.set_speed(new_tempo);
-            self.current_tempo = new_tempo;
-            self.cached_tempo = new_tempo as f64;
-        }
+        update_pitch_tempo(
+            &mut self.ts,
+            &self.pitch_semitones,
+            &self.tempo,
+            &mut self.current_pitch,
+            &mut self.current_tempo,
+            &mut self.cached_tempo,
+        );
 
         // 3. Update cached loop bounds
         {
@@ -861,16 +907,8 @@ impl Iterator for SoundTouchSource {
 
         if self.out_idx < self.out_buf.len() {
             let raw_val = self.out_buf[self.out_idx];
-            let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
-            let mut val = raw_val * vol;
-            // Soft-clip limiter: voorkomt harde vervorming bij volume > 1.0
-            if val > 1.0 {
-                val = 1.0 - 1.0 / (val + 1.0);
-            } else if val < -1.0 {
-                val = -1.0 + 1.0 / (-val + 1.0);
-            }
+            let val = apply_volume_soft_clip(raw_val, &self.volume);
             self.out_idx += 1;
-
             // ✅ Positie accumuleren en wrappen — subtractie ipv modulo
             self.current_audio_pos += self.cached_tempo;
             {
