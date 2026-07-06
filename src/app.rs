@@ -1862,27 +1862,24 @@ impl eframe::App for LoopEditorApp {
                     });
                 }
 
-                // ── Export button ──
+                // ── Right-side buttons (ARR + Export) ──
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("ARR").clicked() {
+                        self.show_arranger ^= true;
+                    }
                     if self.waveform_state.path.is_some() {
                         let track = self
                             .library
                             .track_for_path(self.waveform_state.path.as_ref().unwrap());
                         if !track.loops.is_empty() {
                             if ui
-                                .button("\u{1F4E4} Export")
+                                .button("📤 Export")
                                 .on_hover_text("Exporteer loops naar WAV (Ctrl+E)")
                                 .clicked()
                             {
                                 self.open_export_window();
                             }
                         }
-                    }
-                });
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("ARR").clicked() {
-                        self.show_arranger ^= true;
                     }
                 });
             });
@@ -2528,7 +2525,8 @@ impl eframe::App for LoopEditorApp {
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui.small_button("❌").clicked() {
-                                                self.confirm_delete_track = Some((ti, track.label.clone()));
+                                                self.confirm_delete_track =
+                                                    Some((ti, track.label.clone()));
                                             }
                                             if ui.small_button("▶").clicked() {
                                                 load_loop_op = Some((ti, 0)); // load track, eerste loop
@@ -2617,7 +2615,6 @@ impl eframe::App for LoopEditorApp {
                                 crate::loops::save_library(&self.library);
                             }
                         }
-
 
                         if let Some((ti, li)) = load_loop_op {
                             // Clone eerst alle data die we nodig hebben

@@ -23,6 +23,35 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Waveform Loop Editor",
         options,
-        Box::new(|_cc| Ok(Box::new(app::LoopEditorApp::new()))),
+        Box::new(|cc| {
+            // ── Font setup ──
+            // DejaVu Sans Mono heeft uitstekende Unicode-dekking (pijlen, symbolen, etc.)
+            // We gebruiken het als primair monospace font + als fallback voor proportional.
+            let mut fonts = eframe::egui::FontDefinitions::default();
+
+            fonts.font_data.insert(
+                "DejaVuSansMono".to_string(),
+                eframe::egui::FontData::from_static(include_bytes!(
+                    "../vendor/fonts/DejaVuSansMono.ttf"
+                )),
+            );
+
+            // Monospace: DejaVu bovenaan (voorrang boven Hack)
+            if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {
+                monospace.insert(0, "DejaVuSansMono".to_string());
+            }
+
+            // Proportional: DejaVu achteraan (laatste fallback voor missende tekens)
+            if let Some(proportional) = fonts
+                .families
+                .get_mut(&eframe::egui::FontFamily::Proportional)
+            {
+                proportional.push("DejaVuSansMono".to_string());
+            }
+
+            cc.egui_ctx.set_fonts(fonts);
+
+            Ok(Box::new(app::LoopEditorApp::new()))
+        }),
     )
 }
