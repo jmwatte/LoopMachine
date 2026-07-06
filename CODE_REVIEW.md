@@ -53,7 +53,7 @@ _Grote opsplitsingen die het bestand beheersbaar maken._
 
 | # | Item | Bestand(en) | Geschatte tijd |
 |---|------|-------------|---------------|
-| 16 | Split `app.rs` op in submmodules (`ui_export.rs`, `ui_playback.rs`, etc.) | `app.rs` (3000→~500 regels per file) | 1-2 uur |
+| 16 | ✅ Split `app.rs` op in submmodules (export code verplaatst) (`ui_export.rs`, `ui_playback.rs`, etc.) | `app.rs` (3000→~500 regels per file) | 1-2 uur |
 
 ---
 
