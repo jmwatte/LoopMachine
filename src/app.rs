@@ -277,8 +277,11 @@ impl LoopEditorApp {
         match crate::waveform::decode_audio(path, self.waveform_state.channel_mode) {
             Ok((samples, sample_rate, duration_secs, warning)) => {
                 self.waveform_state.path = Some(path.to_string());
+                // Bouw waveform summary voor snelle weergave bij elke zoom
+                let summary = crate::waveform::WaveformSummary::build(&samples);
                 self.waveform_state.samples = Arc::new(samples);
                 self.waveform_state.sample_rate = sample_rate;
+                self.waveform_state.summary = Some(summary);
                 self.waveform_state.duration_secs = duration_secs;
                 self.waveform_state.zoom = 50.0;
                 self.waveform_state.scroll_offset = 0.0;

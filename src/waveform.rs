@@ -83,12 +83,93 @@ pub struct Marker {
     pub position_secs: f32,
     pub kind: MarkerKind,
 }
+/// Pre-computed min/max summary of waveform for efficient rendering at any zoom level.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct WaveformSummary {
+    /// (min, max) pairs per level. Level 0 = 1 sample/bin, level 1 = 4/bin, etc.
+    levels: Vec<Vec<(f32, f32)>>,
+    /// How many samples each bin covers at each level.
+    samples_per_bin: Vec<u32>,
+    total_samples: usize,
+}
+
+impl WaveformSummary {
+    /// Build a summary pyramid from raw PCM samples.
+    pub fn build(samples: &[f32]) -> Self {
+        let bin_sizes: [u32; 6] = [4, 16, 64, 256, 1024, 4096];
+        let total_samples = samples.len();
+        let mut levels = Vec::with_capacity(bin_sizes.len());
+        let mut samples_per_bin = Vec::with_capacity(bin_sizes.len());
+
+        for &bin_size in &bin_sizes {
+            if bin_size as usize >= total_samples {
+                // Don't add levels bigger than the file
+                continue;
+            }
+            let num_bins = total_samples.div_ceil(bin_size as usize);
+            let mut level = Vec::with_capacity(num_bins);
+            for chunk in samples.chunks(bin_size as usize) {
+                let (mut min, mut max) = (chunk[0], chunk[0]);
+                for &s in chunk {
+                    if s < min { min = s; }
+                    if s > max { max = s; }
+                }
+                level.push((min, max));
+            }
+            levels.push(level);
+            samples_per_bin.push(bin_size);
+        }
+
+        Self { levels, samples_per_bin, total_samples }
+    }
+
+    /// Pick the best level index for a given samples-per-pixel ratio.
+    fn best_level(&self, samples_per_pixel: f32) -> usize {
+        if samples_per_pixel <= 1.0 { return 0; }
+        let mut best = 0;
+        for (i, &bin_size) in self.samples_per_bin.iter().enumerate() {
+            if (bin_size as f32 - samples_per_pixel).abs() < (self.samples_per_bin[best] as f32 - samples_per_pixel).abs() {
+                best = i;
+            }
+        }
+        best.min(self.levels.len().saturating_sub(1))
+    }
+
+    /// Get min/max for a sample range, using the best available mip level.
+    pub fn get_range(&self, start_sample: usize, end_sample: usize) -> (f32, f32) {
+        let range = (end_sample - start_sample).max(1);
+        let spp = range as f32;
+        let level_idx = self.best_level(spp);
+        let bin_size = self.samples_per_bin[level_idx] as usize;
+        let bin_start = start_sample / bin_size;
+        let bin_end = (end_sample + bin_size - 1) / bin_size;
+        let level = &self.levels[level_idx];
+
+        let bin_start = bin_start.min(level.len().saturating_sub(1));
+        let bin_end = bin_end.min(level.len());
+
+        if bin_start >= bin_end || bin_start >= level.len() {
+            return (0.0, 0.0);
+        }
+
+        let (mut min, mut max) = level[bin_start];
+        for i in (bin_start + 1)..bin_end {
+            let (m, x) = level[i];
+            if m < min { min = m; }
+            if x > max { max = x; }
+        }
+        (min, max)
+    }
+}
 
 /// State voor de waveform-editor
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct WaveformState {
     pub path: Option<String>,
     pub samples: Arc<Vec<f32>>, // PCM samples (mono, gemixt)
+    pub summary: Option<WaveformSummary>,
     pub sample_rate: u32,
     pub duration_secs: f32,
     pub zoom: f32,          // pixels per second
@@ -142,6 +223,7 @@ impl Default for WaveformState {
             seek_pending: None,
             channel_mode: ChannelMode::Mono,
             volume: 1.0,
+            summary: None,
         }
     }
 }
@@ -583,17 +665,19 @@ pub fn render_waveform(
             continue;
         }
 
-        let mut min_val = 0.0_f32;
-        let mut max_val = 0.0_f32;
-        for s in sample_start..sample_end {
-            let val = state.samples[s];
-            if val < min_val {
-                min_val = val;
+        let (min_val, max_val) = if let Some(ref summary) = state.summary {
+            summary.get_range(sample_start, sample_end)
+        } else {
+            // Fallback: iterate over samples (original behavior)
+            let mut min_val = 0.0_f32;
+            let mut max_val = 0.0_f32;
+            for s in sample_start..sample_end {
+                let val = state.samples[s];
+                if val < min_val { min_val = val; }
+                if val > max_val { max_val = val; }
             }
-            if val > max_val {
-                max_val = val;
-            }
-        }
+            (min_val, max_val)
+        };
 
         let x = rect.left() + pixel_x as f32;
         let p1 = egui::pos2(x, center_y + min_val * height * 0.45);

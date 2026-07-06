@@ -46,7 +46,7 @@ _Deze veranderen de interne structuur en hebben testtijd nodig._
 |---|------|-------------|---------------|
 | 13 | ✅ Deel fill_buffer-logica tussen `SoundTouchSource` en `SequenceSource` | `waveform_player.rs` | 45 min |
 | 14 | ✅ Dubbele `SaveLoop` code consolideren in één methode | `app.rs` | 15 min |
-| 15 | Waveform rendering: mipmap/summary voor grote bestanden | `waveform.rs` | 1 uur |
+| 15 | ✅ Waveform rendering: mipmap/summary voor grote bestanden | `waveform.rs` | 1 uur |
 
 ### Fase 5 — Architectuur
 _Grote opsplitsingen die het bestand beheersbaar maken._
