@@ -1,4 +1,4 @@
-use crate::arrangement::Arrangement;
+use crate::arrangement::{color_for_arranger, Arrangement};
 use crate::chroma::{detect_chroma, Chroma};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
@@ -2379,7 +2379,30 @@ impl eframe::App for LoopEditorApp {
 
                     for (i, saved) in track.loops.iter().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&saved.label).size(13.0).strong());
+                            // Toon short_id met gekleurd blokje
+                            let id_str = saved
+                                .short_id
+                                .as_deref()
+                                .map(|id| format!("({}) ", id))
+                                .unwrap_or_default();
+                            let col = saved
+                                .short_id
+                                .as_deref()
+                                .map(|id| color_for_arranger(id, &track_path));
+                            if let Some([r, g, b]) = col {
+                                let color = Color32::from_rgb(r, g, b);
+                                egui::Frame::default()
+                                    .fill(color)
+                                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(80)))
+                                    .show(ui, |ui| {
+                                        ui.set_min_size(egui::vec2(10.0, 10.0));
+                                    });
+                            }
+                            ui.label(
+                                RichText::new(format!("{}{}", id_str, saved.label))
+                                    .size(13.0)
+                                    .strong(),
+                            );
                             ui.label(
                                 RichText::new(format!(
                                     "  {:02}:{:02} → {:02}:{:02}  |  Pitch: {:+.1}  Tempo: {:.2}x",
@@ -2599,7 +2622,34 @@ impl eframe::App for LoopEditorApp {
                                     for (li, saved) in track.loops.iter().enumerate() {
                                         ui.indent("loops", |ui| {
                                             ui.horizontal(|ui| {
-                                                ui.label(RichText::new(&saved.label).size(12.0));
+                                                // Toon short_id met gekleurd blokje
+                                                let id_str = saved
+                                                    .short_id
+                                                    .as_deref()
+                                                    .map(|id| format!("({}) ", id))
+                                                    .unwrap_or_default();
+                                                let col = saved.short_id.as_deref().map(|id| {
+                                                    color_for_arranger(id, &track.track_path)
+                                                });
+                                                if let Some([r, g, b]) = col {
+                                                    let color = Color32::from_rgb(r, g, b);
+                                                    egui::Frame::default()
+                                                        .fill(color)
+                                                        .stroke(egui::Stroke::new(
+                                                            1.0,
+                                                            Color32::from_gray(80),
+                                                        ))
+                                                        .show(ui, |ui| {
+                                                            ui.set_min_size(egui::vec2(10.0, 10.0));
+                                                        });
+                                                }
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{}{}",
+                                                        id_str, saved.label
+                                                    ))
+                                                    .size(12.0),
+                                                );
                                                 ui.label(
                                                     RichText::new(format!(
                                                         "{:02}:{:02} → {:02}:{:02}",
