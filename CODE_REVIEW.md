@@ -22,7 +22,7 @@ _Problemen die verkeerd gedrag veroorzaken, maar klein zijn om te fixen._
 | # | Item | Bestand(en) | Geschatte tijd |
 |---|------|-------------|---------------|
 | 5 | ✅ Fix `waveform_has_content` — zet op `true` na succesvolle `load_file` | `app.rs` | 5 min |
-| 6 | Fix mono kanaalmodus — mono moet door `mode.mix()` gaan, niet overslaan | `waveform.rs:273-276` | 10 min |
+| 6 | ✅ Fix mono kanaalmodus — mono moet door `mode.mix()` gaan, niet overslaan | `waveform.rs` | 10 min |
 | 7 | Expliciete `SetLoopEnabled(false)` bij right-click wissen | `app.rs:2058-2063` | 5 min |
 | 8 | Default color hash i.p.v. `[128; 3]` in `ArrStep` | `arrangement.rs:48-50` | 10 min |
 

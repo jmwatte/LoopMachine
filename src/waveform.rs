@@ -273,9 +273,10 @@ pub fn decode_audio(
                         let left = buf.get(l_idx).copied().unwrap_or(0.0);
                         let right = buf.get(r_idx).copied().unwrap_or(0.0);
                         samples.push(mode.mix(left, right));
-                    } else if num_channels == 1 {
-                        let idx = frame;
-                        samples.push(buf.get(idx).copied().unwrap_or(0.0));
+                    } else {
+                        // Mono: zelfde sample voor L en R, laat mode.mix() bepalen wat ermee gebeurt
+                        let sample = buf.get(frame).copied().unwrap_or(0.0);
+                        samples.push(mode.mix(sample, sample));
                     }
                 }
                 if samples.len() >= max_samples {
