@@ -389,6 +389,44 @@ impl LoopEditorApp {
         }
     }
 
+    /// Sla de huidige A-B selectie op als een nieuwe loop in de bibliotheek.
+    fn save_current_loop(&mut self) -> bool {
+        if let (Some(a), Some(b)) = (
+            self.waveform_state.loop_a_secs,
+            self.waveform_state.loop_b_secs,
+        ) {
+            if b > a {
+                if let Some(ref path) = self.waveform_state.path.clone() {
+                    let label = self.library.generate_label(path);
+                    let saved = SavedLoop {
+                        label,
+                        short_id: None,
+                        loop_a_secs: a,
+                        loop_b_secs: b,
+                        pitch_semitones: self.waveform_state.pitch_semitones,
+                        tempo: self.waveform_state.tempo,
+                        notes: String::new(),
+                    };
+                    self.library.add_loop(path, saved);
+                    let total = self
+                        .library
+                        .tracks
+                        .iter()
+                        .filter(|t| t.track_path == *path)
+                        .flat_map(|t| &t.loops)
+                        .count();
+                    crate::loops::save_library(&self.library);
+                    self.status_message = format!("Loop opgeslagen! ({} totaal)", total);
+                    self.status_message_timer = 3 * 60;
+                    return true;
+                }
+            }
+        }
+        self.status_message = "Geen A-B loop om op te slaan".to_string();
+        self.status_message_timer = 2 * 60;
+        false
+    }
+
     /// Sla huidige editor state op voor undo.
     fn push_undo(&mut self) {
         const MAX_UNDO: usize = 50;
@@ -1591,40 +1629,7 @@ impl eframe::App for LoopEditorApp {
                 .shortcuts
                 .is_pressed(ShortcutAction::SaveLoop, &ctx.input(|i| i.clone()))
             {
-                if let (Some(a), Some(b)) = (
-                    self.waveform_state.loop_a_secs,
-                    self.waveform_state.loop_b_secs,
-                ) {
-                    if b > a {
-                        if let Some(ref path) = self.waveform_state.path {
-                            let label = self.library.generate_label(path);
-                            let saved = SavedLoop {
-                                label,
-                                short_id: None,
-                                loop_a_secs: a,
-                                loop_b_secs: b,
-                                pitch_semitones: self.waveform_state.pitch_semitones,
-                                tempo: self.waveform_state.tempo,
-                                notes: String::new(),
-                            };
-
-                            self.library.add_loop(path, saved);
-                            let total = self
-                                .library
-                                .tracks
-                                .iter()
-                                .filter(|t| t.track_path == *path)
-                                .flat_map(|t| &t.loops)
-                                .count();
-                            crate::loops::save_library(&self.library);
-                            self.status_message = format!("Loop opgeslagen! ({} totaal)", total);
-                            self.status_message_timer = 3 * 60;
-                        }
-                    }
-                } else {
-                    self.status_message = "Geen A-B loop om op te slaan".to_string();
-                    self.status_message_timer = 2 * 60;
-                }
+                self.save_current_loop();
             }
 
             // ToggleLoopPoint — 1 toets A-B
@@ -2228,38 +2233,7 @@ impl eframe::App for LoopEditorApp {
                     && self.waveform_state.loop_b_secs.is_some()
                 {
                     if ui.button("💾 Save Loop").clicked() {
-                        if let (Some(a), Some(b)) = (
-                            self.waveform_state.loop_a_secs,
-                            self.waveform_state.loop_b_secs,
-                        ) {
-                            if b > a {
-                                if let Some(ref path) = self.waveform_state.path {
-                                    let label = self.library.generate_label(path);
-                                    let saved = SavedLoop {
-                                        label,
-                                        short_id: None,
-                                        loop_a_secs: a,
-                                        loop_b_secs: b,
-                                        pitch_semitones: self.waveform_state.pitch_semitones,
-                                        tempo: self.waveform_state.tempo,
-                                        notes: String::new(),
-                                    };
-
-                                    self.library.add_loop(path, saved);
-                                    let total = self
-                                        .library
-                                        .tracks
-                                        .iter()
-                                        .filter(|t| t.track_path == *path)
-                                        .flat_map(|t| &t.loops)
-                                        .count();
-                                    crate::loops::save_library(&self.library);
-                                    self.status_message =
-                                        format!("Loop opgeslagen! ({} totaal)", total);
-                                    self.status_message_timer = 3 * 60;
-                                }
-                            }
-                        }
+                        self.save_current_loop();
                     }
                 }
 
