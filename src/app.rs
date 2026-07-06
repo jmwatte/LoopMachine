@@ -112,6 +112,7 @@ pub struct LoopEditorApp {
     pub arr_parse_buf: String,
 
     // Export
+    confirm_delete_track: Option<(usize, String)>,
     export_state: ExportState,
     export_dialog: FileDialog,
     export_pending: Option<ExportParams>,
@@ -225,6 +226,7 @@ impl LoopEditorApp {
                 )
                 .title("Exporteer loops"),
             export_pending: None,
+            confirm_delete_track: None,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -254,6 +256,15 @@ impl LoopEditorApp {
     }
 
     pub fn load_file(&mut self, path: &str) {
+        // Controleer of bestand bestaat — voor duidelijke foutmelding
+        if !std::path::Path::new(path).exists() {
+            let msg = format!("Bestand niet gevonden: {}", path);
+            self.waveform_state.error = Some(msg.clone());
+            self.status_message = msg;
+            self.status_message_timer = 10 * 60;
+            return;
+        }
+
         // Stop huidige playback als er een ander bestand wordt geladen
         if self.waveform_state.path.as_deref() != Some(path) {
             if self.waveform_is_playing {
@@ -276,7 +287,6 @@ impl LoopEditorApp {
                 self.waveform_state.error = None;
                 self.waveform_play_position = 0.0;
                 self.waveform_play_duration = duration_secs;
-                self.waveform_has_content = true;
 
                 // Herstel markers uit de bibliotheek
                 let track = self.library.track_for_path(path);
@@ -2523,6 +2533,7 @@ impl eframe::App for LoopEditorApp {
                         ui.label("Nog geen tracks. Laad een audiobestand en maak loops.");
                     } else {
                         let mut delete_loop_op: Option<(usize, usize)> = None;
+                        let _delete_track_op: Option<usize> = None;
                         let mut load_loop_op: Option<(usize, usize)> = None;
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -2542,6 +2553,9 @@ impl eframe::App for LoopEditorApp {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
+                                            if ui.small_button("❌").clicked() {
+                                                self.confirm_delete_track = Some((ti, track.label.clone()));
+                                            }
                                             if ui.small_button("▶").clicked() {
                                                 load_loop_op = Some((ti, 0)); // load track, eerste loop
                                             }
@@ -2630,6 +2644,7 @@ impl eframe::App for LoopEditorApp {
                             }
                         }
 
+
                         if let Some((ti, li)) = load_loop_op {
                             // Clone eerst alle data die we nodig hebben
                             let (track_path, saved) = {
@@ -2639,19 +2654,18 @@ impl eframe::App for LoopEditorApp {
                                 (path, saved)
                             };
 
-                            if let Some(saved) = saved {
-                                let track_changed =
-                                    self.waveform_state.path.as_deref() != Some(&track_path);
-
-                                if track_changed {
-                                    if self.waveform_is_playing {
-                                        let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
-                                        self.waveform_is_playing = false;
-                                    }
-                                    self.load_file(&track_path);
-                                    self.waveform_has_content = false;
+                            // Laad de track altijd (ook als er geen loops zijn)
+                            if self.waveform_state.path.as_deref() != Some(&track_path) {
+                                if self.waveform_is_playing {
+                                    let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+                                    self.waveform_is_playing = false;
                                 }
+                                self.load_file(&track_path);
+                                self.waveform_has_content = false;
+                            }
 
+                            // Als er een specifieke loop geselecteerd is, laad die dan
+                            if let Some(saved) = saved {
                                 self.waveform_state.loop_a_secs = Some(saved.loop_a_secs);
                                 self.waveform_state.loop_b_secs = Some(saved.loop_b_secs);
                                 self.waveform_state.pitch_semitones = saved.pitch_semitones;
@@ -2680,7 +2694,7 @@ impl eframe::App for LoopEditorApp {
                                 }
 
                                 // Zet actieve loop voor notities (alleen als zelfde track)
-                                if !track_changed {
+                                if self.waveform_state.path.as_deref() == Some(&track_path) {
                                     self.active_loop_idx = Some(li);
                                 }
 
@@ -2688,9 +2702,40 @@ impl eframe::App for LoopEditorApp {
 
                                 self.status_message = format!("Loop '{}' geladen", saved.label);
                                 self.status_message_timer = 3 * 60;
+                            } else {
+                                self.waveform_state.loop_a_secs = None;
+                                self.waveform_state.loop_b_secs = None;
+                                self.status_message = "Track geladen".to_string();
+                                self.status_message_timer = 3 * 60;
                             }
                         }
                     }
+                });
+        }
+
+        // ── Confirm track delete ──
+        if let Some((ti, ref name)) = self.confirm_delete_track.clone() {
+            egui::Window::new("⚠ Track verwijderen")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Weet je zeker dat je track \"{}\" en al zijn loops wilt verwijderen?",
+                        name
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button("Ja").clicked() {
+                            if ti < self.library.tracks.len() {
+                                self.library.tracks.remove(ti);
+                                crate::loops::save_library(&self.library);
+                            }
+                            self.confirm_delete_track = None;
+                        }
+                        if ui.button("Nee").clicked() {
+                            self.confirm_delete_track = None;
+                        }
+                    });
                 });
         }
 
@@ -2764,7 +2809,14 @@ impl eframe::App for LoopEditorApp {
         self.file_dialog.update(ctx);
 
         if let Some(path) = self.file_dialog.take_selected() {
-            let path_str = path.to_string_lossy().to_string();
+            let raw = path.to_string_lossy();
+            // Strip \\?\ prefix that Windows file dialogs sometimes add
+            let prefix = "\\\\?\\";
+            let path_str = if raw.starts_with(prefix) {
+                raw[prefix.len()..].to_string()
+            } else {
+                raw.to_string()
+            };
             self.file_path = path_str.clone();
             self.load_file(&path_str);
         }

@@ -35,6 +35,9 @@ _Code herstructureren zonder functie te veranderen._
 | 10 | ✅ Cache `all_possible_ids()` met `OnceLock` | `arrangement.rs` | 10 min |
 | 11 | ✅ Voeg `UndoState::snapshot_from()` en `.apply_to()` methodes toe | `app.rs` | 20 min |
 | 12 | ✅ Pre-allocatie van `input_chunk`/`temp_out` in source structs | `waveform_player.rs` | 20 min |
+| — | ✅ Strip `\\?\\` prefix van Windows file dialog paden | `app.rs` | — |
+| — | ✅ Vroege `Path::exists()` check in `load_file` voor betere feedback | `app.rs` | — |
+| — | ✅ ❌ delete track knop in Alle Tracks window | `app.rs` | — |
 
 ### Fase 4 — Grotere refactors
 _Deze veranderen de interne structuur en hebben testtijd nodig._
