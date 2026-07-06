@@ -34,7 +34,7 @@ _Code herstructureren zonder functie te veranderen._
 | 9 | ✅ Verplaats `egui_key_to_serializable` naar `shortcuts.rs` | `app.rs`, `shortcuts.rs` | 15 min |
 | 10 | ✅ Cache `all_possible_ids()` met `OnceLock` | `arrangement.rs` | 10 min |
 | 11 | ✅ Voeg `UndoState::snapshot_from()` en `.apply_to()` methodes toe | `app.rs` | 20 min |
-| 12 | Pre-allocatie van `input_chunk`/`temp_out` in source structs | `waveform_player.rs` | 20 min |
+| 12 | ✅ Pre-allocatie van `input_chunk`/`temp_out` in source structs | `waveform_player.rs` | 20 min |
 
 ### Fase 4 — Grotere refactors
 _Deze veranderen de interne structuur en hebben testtijd nodig._

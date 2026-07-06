@@ -454,6 +454,10 @@ struct SoundTouchSource {
     cached_loop_end: f64,
     cached_loop_dur: f64,
     current_audio_pos: f64,
+    /// Herbruikbare buffers om allocaties in fill_buffer te voorkomen
+    input_chunk: Vec<f32>,
+    temp_out: Vec<f32>,
+    flush_buf: Vec<f32>,
 }
 
 // ───────────────────────────────────────────────
@@ -483,6 +487,10 @@ struct SequenceSource {
     current_audio_pos: f64,
     /// Kanaal om events terug naar UI te sturen
     step_event_tx: Sender<WaveformEvent>,
+    /// Herbruikbare buffers om allocaties in fill_buffer te voorkomen
+    input_chunk: Vec<f32>,
+    temp_out: Vec<f32>,
+    flush_buf: Vec<f32>,
 }
 
 impl SequenceSource {
@@ -525,6 +533,9 @@ impl SequenceSource {
             cached_tempo: initial_tempo as f64,
             current_audio_pos: start_pos as f64,
             step_event_tx,
+            input_chunk: Vec::with_capacity(4096),
+            temp_out: vec![0.0; 4096],
+            flush_buf: vec![0.0; 4096],
         }
     }
 
@@ -547,26 +558,26 @@ impl SequenceSource {
         self.out_idx = 0;
 
         let target_out = 4096;
-        let mut input_chunk = Vec::with_capacity(4096);
+        self.input_chunk.clear();
 
         while self.out_buf.len() < target_out {
             // Huidige stap ophalen
             let step = &self.sequence[self.current_step_idx];
 
-            input_chunk.clear();
+            self.input_chunk.clear();
 
             // Samples inlezen van huidige read_pos tot einde van deze loop
-            while input_chunk.len() < 4096 {
+            while self.input_chunk.len() < 4096 {
                 if self.read_pos >= step.end_sample {
                     break;
                 }
-                let to_read = (4096 - input_chunk.len()).min(step.end_sample - self.read_pos);
-                input_chunk
+                let to_read = (4096 - self.input_chunk.len()).min(step.end_sample - self.read_pos);
+                self.input_chunk
                     .extend_from_slice(&self.raw_samples[self.read_pos..self.read_pos + to_read]);
                 self.read_pos += to_read;
             }
 
-            if input_chunk.is_empty() {
+            if self.input_chunk.is_empty() {
                 // Geen input meer → verwerk herhalingen of volgende stap
                 let step_idx = self.current_step_idx;
                 let repeats = self.sequence[step_idx].repeats;
@@ -593,24 +604,23 @@ impl SequenceSource {
                 // Einde arrangement
                 let _ = self.step_event_tx.send(WaveformEvent::ArrangementFinished);
                 // Flush wat er nog in TimeStretch zit
-                let mut flush_buf = vec![0.0; 4096];
-                let received = self.ts.receive_samples(&mut flush_buf, 4096);
+                let received = self.ts.receive_samples(&mut self.flush_buf, 4096);
                 if received > 0 {
-                    self.out_buf.extend_from_slice(&flush_buf[..received]);
+                    self.out_buf.extend_from_slice(&self.flush_buf[..received]);
                 }
                 break;
             }
 
             // Verwerk via TimeStretch
-            self.ts.put_samples(&input_chunk, input_chunk.len());
+            self.ts
+                .put_samples(&self.input_chunk, self.input_chunk.len());
 
-            let mut temp_out = vec![0.0; 4096];
             loop {
-                let received = self.ts.receive_samples(&mut temp_out, 4096);
+                let received = self.ts.receive_samples(&mut self.temp_out, 4096);
                 if received == 0 {
                     break;
                 }
-                self.out_buf.extend_from_slice(&temp_out[..received]);
+                self.out_buf.extend_from_slice(&self.temp_out[..received]);
             }
         }
     }
@@ -726,6 +736,9 @@ impl SoundTouchSource {
             cached_loop_end: c_end,
             cached_loop_dur: c_dur,
             current_audio_pos: start_pos as f64,
+            input_chunk: Vec::with_capacity(4096),
+            temp_out: vec![0.0; 4096],
+            flush_buf: vec![0.0; 4096],
         }
     }
 
@@ -778,12 +791,12 @@ impl SoundTouchSource {
         }
 
         let target_out = 4096;
-        let mut input_chunk = Vec::with_capacity(4096);
+        self.input_chunk.clear();
 
         while self.out_buf.len() < target_out {
-            input_chunk.clear();
+            self.input_chunk.clear();
 
-            while input_chunk.len() < 4096 {
+            while self.input_chunk.len() < 4096 {
                 let end_pos = if self.cached_loop_enabled {
                     self.cached_loop_end as usize
                 } else {
@@ -799,35 +812,34 @@ impl SoundTouchSource {
                     }
                 }
 
-                let to_read = (4096 - input_chunk.len()).min(end_pos - self.read_pos);
+                let to_read = (4096 - self.input_chunk.len()).min(end_pos - self.read_pos);
                 if to_read == 0 {
                     break;
                 }
 
-                input_chunk
+                self.input_chunk
                     .extend_from_slice(&self.raw_samples[self.read_pos..self.read_pos + to_read]);
                 self.read_pos += to_read;
             }
 
-            if input_chunk.is_empty() {
-                let mut flush_buf = vec![0.0; 4096];
-                let received = self.ts.receive_samples(&mut flush_buf, 4096);
+            if self.input_chunk.is_empty() {
+                let received = self.ts.receive_samples(&mut self.flush_buf, 4096);
                 if received > 0 {
-                    self.out_buf.extend_from_slice(&flush_buf[..received]);
+                    self.out_buf.extend_from_slice(&self.flush_buf[..received]);
                 }
                 break;
             }
 
-            self.ts.put_samples(&input_chunk, input_chunk.len());
+            self.ts
+                .put_samples(&self.input_chunk, self.input_chunk.len());
 
             // Drain ALLES wat Rubber Band beschikbaar heeft, niet maar 1 batch
-            let mut temp_out = vec![0.0; 4096];
             loop {
-                let received = self.ts.receive_samples(&mut temp_out, 4096);
+                let received = self.ts.receive_samples(&mut self.temp_out, 4096);
                 if received == 0 {
                     break;
                 }
-                self.out_buf.extend_from_slice(&temp_out[..received]);
+                self.out_buf.extend_from_slice(&self.temp_out[..received]);
             }
         }
     }
