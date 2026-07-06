@@ -309,6 +309,7 @@ impl LoopEditorApp {
                 self.waveform_state.error = None;
                 self.waveform_play_position = 0.0;
                 self.waveform_play_duration = duration_secs;
+                self.waveform_has_content = true;
 
                 // Herstel markers uit de bibliotheek
                 let track = self.library.track_for_path(path);
