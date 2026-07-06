@@ -361,6 +361,73 @@ impl SerializableKey {
 }
 
 // Conversie naar egui::Key
+impl From<egui::Key> for SerializableKey {
+    fn from(k: egui::Key) -> Self {
+        match k {
+            egui::Key::Space => SerializableKey::Space,
+            egui::Key::Enter => SerializableKey::Enter,
+            egui::Key::Escape => SerializableKey::Escape,
+            egui::Key::Backspace => SerializableKey::Backspace,
+            egui::Key::Tab => SerializableKey::Tab,
+            egui::Key::ArrowLeft => SerializableKey::ArrowLeft,
+            egui::Key::ArrowRight => SerializableKey::ArrowRight,
+            egui::Key::ArrowUp => SerializableKey::ArrowUp,
+            egui::Key::ArrowDown => SerializableKey::ArrowDown,
+            egui::Key::A => SerializableKey::A,
+            egui::Key::B => SerializableKey::B,
+            egui::Key::C => SerializableKey::C,
+            egui::Key::D => SerializableKey::D,
+            egui::Key::E => SerializableKey::E,
+            egui::Key::F => SerializableKey::F,
+            egui::Key::G => SerializableKey::G,
+            egui::Key::H => SerializableKey::H,
+            egui::Key::I => SerializableKey::I,
+            egui::Key::J => SerializableKey::J,
+            egui::Key::K => SerializableKey::K,
+            egui::Key::L => SerializableKey::L,
+            egui::Key::M => SerializableKey::M,
+            egui::Key::N => SerializableKey::N,
+            egui::Key::O => SerializableKey::O,
+            egui::Key::P => SerializableKey::P,
+            egui::Key::Q => SerializableKey::Q,
+            egui::Key::R => SerializableKey::R,
+            egui::Key::S => SerializableKey::S,
+            egui::Key::T => SerializableKey::T,
+            egui::Key::U => SerializableKey::U,
+            egui::Key::V => SerializableKey::V,
+            egui::Key::W => SerializableKey::W,
+            egui::Key::X => SerializableKey::X,
+            egui::Key::Y => SerializableKey::Y,
+            egui::Key::Z => SerializableKey::Z,
+            egui::Key::Num0 => SerializableKey::Num0,
+            egui::Key::Num1 => SerializableKey::Num1,
+            egui::Key::Num2 => SerializableKey::Num2,
+            egui::Key::Num3 => SerializableKey::Num3,
+            egui::Key::Num4 => SerializableKey::Num4,
+            egui::Key::Num5 => SerializableKey::Num5,
+            egui::Key::Num6 => SerializableKey::Num6,
+            egui::Key::Num7 => SerializableKey::Num7,
+            egui::Key::Num8 => SerializableKey::Num8,
+            egui::Key::Num9 => SerializableKey::Num9,
+            egui::Key::OpenBracket => SerializableKey::OpenBracket,
+            egui::Key::CloseBracket => SerializableKey::CloseBracket,
+            egui::Key::F1 => SerializableKey::F1,
+            egui::Key::F2 => SerializableKey::F2,
+            egui::Key::F3 => SerializableKey::F3,
+            egui::Key::F4 => SerializableKey::F4,
+            egui::Key::F5 => SerializableKey::F5,
+            egui::Key::F6 => SerializableKey::F6,
+            egui::Key::F7 => SerializableKey::F7,
+            egui::Key::F8 => SerializableKey::F8,
+            egui::Key::F9 => SerializableKey::F9,
+            egui::Key::F10 => SerializableKey::F10,
+            egui::Key::F11 => SerializableKey::F11,
+            egui::Key::F12 => SerializableKey::F12,
+            _ => SerializableKey::Space, // Fallback
+        }
+    }
+}
+
 impl From<SerializableKey> for egui::Key {
     fn from(k: SerializableKey) -> Self {
         match k {
