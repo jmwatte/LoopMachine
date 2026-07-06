@@ -151,12 +151,15 @@ impl Default for WaveformState {
 ///
 /// ## Geheugenbescherming
 /// Bestanden groter dan 100 MB worden beperkt tot de eerste 5 minuten audio.
-pub fn decode_audio(path: &str, mode: ChannelMode) -> Result<(Vec<f32>, u32, f32), String> {
+pub fn decode_audio(
+    path: &str,
+    mode: ChannelMode,
+) -> Result<(Vec<f32>, u32, f32, Option<String>), String> {
     let path_obj = Path::new(path);
 
     // 0. Controleer bestandsgrootte vóór decoderen
     let file_len = std::fs::metadata(&path_obj).map(|m| m.len()).unwrap_or(0);
-    let _large_file_warning = if file_len > 100_000_000 {
+    let large_file_warning = if file_len > 100_000_000 {
         Some(format!(
             "⚠ Bestand is {:.1} MB > 100 MB. Alleen eerste 5 min. gedecodeerd.",
             file_len as f64 / 1_000_000.0
@@ -288,7 +291,7 @@ pub fn decode_audio(path: &str, mode: ChannelMode) -> Result<(Vec<f32>, u32, f32
 
     let duration_secs = samples.len() as f32 / sample_rate as f32;
 
-    Ok((samples, sample_rate, duration_secs))
+    Ok((samples, sample_rate, duration_secs, large_file_warning))
 }
 
 /// Teken de waveform in een egui UI.

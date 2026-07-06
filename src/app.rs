@@ -296,7 +296,7 @@ impl LoopEditorApp {
         }
 
         match crate::waveform::decode_audio(path, self.waveform_state.channel_mode) {
-            Ok((samples, sample_rate, duration_secs)) => {
+            Ok((samples, sample_rate, duration_secs, warning)) => {
                 self.waveform_state.path = Some(path.to_string());
                 self.waveform_state.samples = Arc::new(samples);
                 self.waveform_state.sample_rate = sample_rate;
@@ -317,7 +317,7 @@ impl LoopEditorApp {
                 self.chroma_result = None;
                 self.save_session();
 
-                self.status_message = format!(
+                let mut msg = format!(
                     "Geladen: {} ({:.1}s, {} Hz)",
                     Path::new(path)
                         .file_name()
@@ -326,6 +326,10 @@ impl LoopEditorApp {
                     duration_secs,
                     sample_rate,
                 );
+                if let Some(warn) = warning {
+                    msg.push_str(&format!("  |  {}", warn));
+                }
+                self.status_message = msg;
                 self.status_message_timer = 5 * 60;
             }
             Err(e) => {
