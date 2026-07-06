@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::loops::Library;
 
@@ -94,31 +94,34 @@ fn hsv_to_rgb(h: u16, s: u8, v: u8) -> [u8; 3] {
 /// Genereer een nieuwe unieke korte ID.
 /// Volgorde: a, b, ..., z, aa, ab, ..., az, ba, bb, ..., zz
 pub fn generate_short_id(existing_ids: &[String]) -> String {
-    for id in all_possible_ids() {
-        if !existing_ids.contains(&id) {
-            return id;
+    for id in all_possible_ids().iter() {
+        if !existing_ids.contains(id) {
+            return id.clone();
         }
     }
     // Zou niet mogen gebeuren (702+ IDs per track)
     "??".to_string()
 }
 
-fn all_possible_ids() -> Vec<String> {
-    let mut ids = Vec::new();
+fn all_possible_ids() -> &'static Vec<String> {
+    static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let mut ids = Vec::new();
 
-    // a-z
-    for c in b'a'..=b'z' {
-        ids.push(String::from_utf8(vec![c]).unwrap());
-    }
-
-    // aa-zz
-    for c1 in b'a'..=b'z' {
-        for c2 in b'a'..=b'z' {
-            ids.push(String::from_utf8(vec![c1, c2]).unwrap());
+        // a-z
+        for c in b'a'..=b'z' {
+            ids.push(String::from_utf8(vec![c]).unwrap());
         }
-    }
 
-    ids
+        // aa-zz
+        for c1 in b'a'..=b'z' {
+            for c2 in b'a'..=b'z' {
+                ids.push(String::from_utf8(vec![c1, c2]).unwrap());
+            }
+        }
+
+        ids
+    })
 }
 
 // ───────────────────────────────────────────────
