@@ -13,7 +13,7 @@ _Deze zijn veilig, klein, en geven meteen momentum._
 |---|------|-------------|---------------|
 | 1 | ✅ Toon `_large_file_warning` in statusbalk i.p.v. weggooien | `waveform.rs`, `app.rs` | 5 min |
 | 2 | ✅ Toon `short_id` in loop-lijst (`(a) NaamLoop` formaat) | `app.rs` | 10 min |
-| 3 | Persisteer `arr_parse_buf` tussen sessies | `app.rs`, `session.rs` | 10 min |
+| 3 | ✅ Persisteer `arr_parse_buf` tussen sessies | `session.rs`, `app.rs` | 10 min |
 | 4 | Vervang `max(0.0).min(dur)` door `clamp(0.0, dur)` voor consistentie | `app.rs`, `waveform.rs` | 10 min |
 
 ### Fase 2 — Bugfixes

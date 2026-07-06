@@ -217,6 +217,7 @@ impl LoopEditorApp {
                     app.load_file(path);
                 }
             }
+            app.arr_parse_buf = session.arr_parse_buf;
         }
 
         app
@@ -445,6 +446,7 @@ impl LoopEditorApp {
             self.waveform_state.tempo,
             self.waveform_state.volume,
             &mode_str,
+            &self.arr_parse_buf,
         );
     }
 
@@ -919,6 +921,7 @@ impl LoopEditorApp {
                         );
                         if resp.lost_focus() && !self.arr_parse_buf.is_empty() {
                             do_parse = true;
+                            self.save_session();
                         }
                         if ui.button("Parse").clicked() && !self.arr_parse_buf.is_empty() {
                             do_parse = true;

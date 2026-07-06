@@ -14,6 +14,9 @@ pub struct SessionState {
     pub tempo: f32,
     pub volume: f32,
     pub channel_mode: String,
+    /// Arranger parse tekstveld, bewaard tussen sessies.
+    #[serde(default)]
+    pub arr_parse_buf: String,
 }
 
 impl SessionState {
@@ -28,6 +31,7 @@ impl SessionState {
         tempo: f32,
         volume: f32,
         channel_mode: &str,
+        arr_parse_buf: &str,
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),
@@ -40,6 +44,7 @@ impl SessionState {
             tempo,
             volume,
             channel_mode: channel_mode.to_string(),
+            arr_parse_buf: arr_parse_buf.to_string(),
         };
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             let _ = std::fs::write(SESSION_FILE, json);
