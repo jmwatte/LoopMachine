@@ -476,13 +476,13 @@ impl LoopEditorApp {
             if b > a {
                 let loop_width = b - a;
                 let target_zoom = (viewport_width_px * 0.6) / loop_width;
-                self.waveform_state.zoom = target_zoom.max(5.0).min(5000.0);
+                self.waveform_state.zoom = target_zoom.clamp(5.0, 5000.0);
 
                 let visible_secs = viewport_width_px / self.waveform_state.zoom;
                 let mid = (a + b) / 2.0;
-                self.waveform_state.scroll_offset = (mid - visible_secs / 2.0)
-                    .max(0.0)
-                    .min((self.waveform_state.duration_secs - visible_secs).max(0.0));
+                let max_scroll = (self.waveform_state.duration_secs - visible_secs).max(0.0);
+                self.waveform_state.scroll_offset =
+                    (mid - visible_secs / 2.0).clamp(0.0, max_scroll);
             }
         }
     }
