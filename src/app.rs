@@ -132,6 +132,36 @@ pub struct UndoState {
     pub loop_bypassed: bool,
 }
 
+impl UndoState {
+    pub fn snapshot_from(app: &LoopEditorApp) -> Self {
+        Self {
+            play_position: app.waveform_play_position,
+            loop_a_secs: app.waveform_state.loop_a_secs,
+            loop_b_secs: app.waveform_state.loop_b_secs,
+            pitch_semitones: app.waveform_state.pitch_semitones,
+            tempo: app.waveform_state.tempo,
+            volume: app.waveform_state.volume,
+            zoom: app.waveform_state.zoom,
+            scroll_offset: app.waveform_state.scroll_offset,
+            markers: app.waveform_state.markers.clone(),
+            loop_bypassed: app.loop_bypassed,
+        }
+    }
+
+    pub fn apply_to(self, app: &mut LoopEditorApp) {
+        app.waveform_play_position = self.play_position;
+        app.waveform_state.loop_a_secs = self.loop_a_secs;
+        app.waveform_state.loop_b_secs = self.loop_b_secs;
+        app.waveform_state.pitch_semitones = self.pitch_semitones;
+        app.waveform_state.tempo = self.tempo;
+        app.waveform_state.volume = self.volume;
+        app.waveform_state.zoom = self.zoom;
+        app.waveform_state.scroll_offset = self.scroll_offset;
+        app.waveform_state.markers = self.markers;
+        app.loop_bypassed = self.loop_bypassed;
+    }
+}
+
 impl LoopEditorApp {
     pub fn new() -> Self {
         let (waveform_cmd_tx, waveform_event_rx) = start_waveform_thread();
@@ -352,18 +382,7 @@ impl LoopEditorApp {
     /// Sla huidige editor state op voor undo.
     fn push_undo(&mut self) {
         const MAX_UNDO: usize = 50;
-        self.undo_stack.push(UndoState {
-            play_position: self.waveform_play_position,
-            loop_a_secs: self.waveform_state.loop_a_secs,
-            loop_b_secs: self.waveform_state.loop_b_secs,
-            pitch_semitones: self.waveform_state.pitch_semitones,
-            tempo: self.waveform_state.tempo,
-            volume: self.waveform_state.volume,
-            zoom: self.waveform_state.zoom,
-            scroll_offset: self.waveform_state.scroll_offset,
-            markers: self.waveform_state.markers.clone(),
-            loop_bypassed: self.loop_bypassed,
-        });
+        self.undo_stack.push(UndoState::snapshot_from(self));
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
         }
@@ -390,16 +409,7 @@ impl LoopEditorApp {
 
     /// Herstel een UndoState.
     fn restore_undo(&mut self, state: UndoState) {
-        self.waveform_play_position = state.play_position;
-        self.waveform_state.loop_a_secs = state.loop_a_secs;
-        self.waveform_state.loop_b_secs = state.loop_b_secs;
-        self.waveform_state.pitch_semitones = state.pitch_semitones;
-        self.waveform_state.tempo = state.tempo;
-        self.waveform_state.volume = state.volume;
-        self.waveform_state.zoom = state.zoom;
-        self.waveform_state.scroll_offset = state.scroll_offset;
-        self.waveform_state.markers = state.markers;
-        self.loop_bypassed = state.loop_bypassed;
+        state.apply_to(self);
         self.sync_loop_bounds();
         self.status_message = "Undo/Redo".to_string();
         self.status_message_timer = 2 * 60;
@@ -1671,18 +1681,7 @@ impl eframe::App for LoopEditorApp {
                 .is_pressed(ShortcutAction::Undo, &ctx.input(|i| i.clone()))
             {
                 if let Some(state) = self.undo_stack.pop() {
-                    self.redo_stack.push(UndoState {
-                        play_position: self.waveform_play_position,
-                        loop_a_secs: self.waveform_state.loop_a_secs,
-                        loop_b_secs: self.waveform_state.loop_b_secs,
-                        pitch_semitones: self.waveform_state.pitch_semitones,
-                        tempo: self.waveform_state.tempo,
-                        volume: self.waveform_state.volume,
-                        zoom: self.waveform_state.zoom,
-                        scroll_offset: self.waveform_state.scroll_offset,
-                        markers: self.waveform_state.markers.clone(),
-                        loop_bypassed: self.loop_bypassed,
-                    });
+                    self.redo_stack.push(UndoState::snapshot_from(self));
                     self.restore_undo(state);
                 }
             }
@@ -1693,18 +1692,7 @@ impl eframe::App for LoopEditorApp {
                 .is_pressed(ShortcutAction::Redo, &ctx.input(|i| i.clone()))
             {
                 if let Some(state) = self.redo_stack.pop() {
-                    self.undo_stack.push(UndoState {
-                        play_position: self.waveform_play_position,
-                        loop_a_secs: self.waveform_state.loop_a_secs,
-                        loop_b_secs: self.waveform_state.loop_b_secs,
-                        pitch_semitones: self.waveform_state.pitch_semitones,
-                        tempo: self.waveform_state.tempo,
-                        volume: self.waveform_state.volume,
-                        zoom: self.waveform_state.zoom,
-                        scroll_offset: self.waveform_state.scroll_offset,
-                        markers: self.waveform_state.markers.clone(),
-                        loop_bypassed: self.loop_bypassed,
-                    });
+                    self.undo_stack.push(UndoState::snapshot_from(self));
                     self.restore_undo(state);
                 }
             }
