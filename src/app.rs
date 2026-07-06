@@ -2063,11 +2063,14 @@ impl eframe::App for LoopEditorApp {
                         }
                     }
                 } else {
-                    // Rechterklik: loop gewist → stuur 0/0 naar audio-thread (enabled: false)
+                    // Rechterklik: loop gewist → stuur 0/0 naar audio-thread + expliciet uitschakelen
                     let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
                         a_secs: 0.0,
                         b_secs: 0.0,
                     });
+                    let _ = self
+                        .waveform_cmd_tx
+                        .send(WaveformCommand::SetLoopEnabled(false));
                     self.pending_loop_point = None;
                     self.status_message = "Loop gewist".to_string();
                     self.status_message_timer = 2 * 60;
