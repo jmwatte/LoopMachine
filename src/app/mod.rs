@@ -1,13 +1,13 @@
-pub mod ui_export;
 pub mod ui_arranger;
+pub mod ui_export;
 pub mod ui_library;
 pub mod ui_shortcuts;
+use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
 use crate::chroma::{detect_chroma, Chroma};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
-use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::waveform::{render_waveform, ChannelMode, WaveformState};
 use crate::waveform_player::{start_waveform_thread, WaveformCommand, WaveformEvent};
 use crossbeam_channel::{Receiver, Sender};
@@ -1144,26 +1144,53 @@ impl eframe::App for LoopEditorApp {
                 self.show_shortcuts = !self.show_shortcuts;
             }
 
-            // RestartLoop — seek naar A en start playback
+            // RestartLoop — seek naar A (of begin file) en start playback
             if self
                 .shortcuts
                 .is_pressed(ShortcutAction::RestartLoop, &ctx.input(|i| i.clone()))
             {
-                if let (Some(a), Some(b)) = (
-                    self.waveform_state.loop_a_secs,
-                    self.waveform_state.loop_b_secs,
-                ) {
-                    if b > a {
-                        self.waveform_play_position = a;
-                        self.waveform_state.seek_pending = Some(a);
+                if self.waveform_state.path.is_some() {
+                    if let (Some(a), Some(b)) = (
+                        self.waveform_state.loop_a_secs,
+                        self.waveform_state.loop_b_secs,
+                    ) {
+                        if b > a {
+                            // Loop ingesteld: speel vanaf A met looping
+                            self.waveform_play_position = a;
+                            self.waveform_state.seek_pending = Some(a);
+                            self.waveform_state.playhead_frames_after_drag = 15;
+                            let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+                                samples: self.waveform_state.samples.clone(),
+                                sample_rate: self.waveform_state.sample_rate,
+                                start_sample: (a * self.waveform_state.sample_rate as f32) as usize,
+                                segment_start_sec: 0.0,
+                                a_sample: (a * self.waveform_state.sample_rate as f32) as usize,
+                                b_sample: (b * self.waveform_state.sample_rate as f32) as usize,
+                                pitch_semitones: Arc::new(AtomicU32::new(f32::to_bits(
+                                    self.waveform_state.pitch_semitones,
+                                ))),
+                                tempo: Arc::new(AtomicU32::new(f32::to_bits(
+                                    self.waveform_state.tempo,
+                                ))),
+                            });
+                            self.waveform_is_playing = true;
+                            self.waveform_has_content = true;
+                            self.status_message = format!("Loop herstart vanaf {:.1}s", a);
+                            self.status_message_timer = 3 * 60;
+                        }
+                    } else {
+                        // Geen loop: speel vanaf begin van de file
+                        let dur = self.waveform_state.duration_secs;
+                        self.waveform_play_position = 0.0;
+                        self.waveform_state.seek_pending = Some(0.0);
                         self.waveform_state.playhead_frames_after_drag = 15;
                         let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
                             samples: self.waveform_state.samples.clone(),
                             sample_rate: self.waveform_state.sample_rate,
-                            start_sample: (a * self.waveform_state.sample_rate as f32) as usize,
+                            start_sample: 0,
                             segment_start_sec: 0.0,
-                            a_sample: (a * self.waveform_state.sample_rate as f32) as usize,
-                            b_sample: (b * self.waveform_state.sample_rate as f32) as usize,
+                            a_sample: 0,
+                            b_sample: 0, // a == b → geen looping
                             pitch_semitones: Arc::new(AtomicU32::new(f32::to_bits(
                                 self.waveform_state.pitch_semitones,
                             ))),
@@ -1173,7 +1200,7 @@ impl eframe::App for LoopEditorApp {
                         });
                         self.waveform_is_playing = true;
                         self.waveform_has_content = true;
-                        self.status_message = format!("Loop herstart vanaf {:.1}s", a);
+                        self.status_message = format!("Speel vanaf begin ({:.1}s)", dur);
                         self.status_message_timer = 3 * 60;
                     }
                 }
@@ -2079,4 +2106,3 @@ impl eframe::App for LoopEditorApp {
         self.show_arranger_ui(ctx);
     }
 }
-
