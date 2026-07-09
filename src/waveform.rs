@@ -112,8 +112,12 @@ impl WaveformSummary {
             for chunk in samples.chunks(bin_size as usize) {
                 let (mut min, mut max) = (chunk[0], chunk[0]);
                 for &s in chunk {
-                    if s < min { min = s; }
-                    if s > max { max = s; }
+                    if s < min {
+                        min = s;
+                    }
+                    if s > max {
+                        max = s;
+                    }
                 }
                 level.push((min, max));
             }
@@ -121,15 +125,23 @@ impl WaveformSummary {
             samples_per_bin.push(bin_size);
         }
 
-        Self { levels, samples_per_bin, total_samples }
+        Self {
+            levels,
+            samples_per_bin,
+            total_samples,
+        }
     }
 
     /// Pick the best level index for a given samples-per-pixel ratio.
     fn best_level(&self, samples_per_pixel: f32) -> usize {
-        if samples_per_pixel <= 1.0 { return 0; }
+        if samples_per_pixel <= 1.0 {
+            return 0;
+        }
         let mut best = 0;
         for (i, &bin_size) in self.samples_per_bin.iter().enumerate() {
-            if (bin_size as f32 - samples_per_pixel).abs() < (self.samples_per_bin[best] as f32 - samples_per_pixel).abs() {
+            if (bin_size as f32 - samples_per_pixel).abs()
+                < (self.samples_per_bin[best] as f32 - samples_per_pixel).abs()
+            {
                 best = i;
             }
         }
@@ -156,8 +168,12 @@ impl WaveformSummary {
         let (mut min, mut max) = level[bin_start];
         for i in (bin_start + 1)..bin_end {
             let (m, x) = level[i];
-            if m < min { min = m; }
-            if x > max { max = x; }
+            if m < min {
+                min = m;
+            }
+            if x > max {
+                max = x;
+            }
         }
         (min, max)
     }
@@ -411,13 +427,40 @@ pub fn render_waveform(
     let marker_start_sec = start_sec;
     let _marker_end_sec = (marker_start_sec + visible_secs).min(state.duration_secs);
 
-    // Teken markers
+    // Teken markers — prioriteit Section (2) > Measure (1) > Beat (0)
     let mut seek_action: Option<f32> = None;
     let mut marker_drag_target: Option<(usize, f32)> = None;
     let mut marker_to_delete: Option<usize> = None;
     let mut double_click_marker_pos: Option<f32> = None;
 
-    for (i, marker) in state.markers.iter().enumerate() {
+    // Prioriteit: Section = 2, Measure = 1, Beat = 0
+    let marker_priority = |kind: MarkerKind| -> u8 {
+        match kind {
+            MarkerKind::Section => 2,
+            MarkerKind::Measure => 1,
+            MarkerKind::Beat => 0,
+        }
+    };
+
+    // Bouw een sorted index: eerst op positie, dan op prioriteit (hoogste eerst)
+    let mut sorted: Vec<usize> = (0..state.markers.len()).collect();
+    sorted.sort_by(|&a, &b| {
+        let ma = &state.markers[a];
+        let mb = &state.markers[b];
+        let pos_cmp = ma.position_secs.total_cmp(&mb.position_secs);
+        if pos_cmp != std::cmp::Ordering::Equal {
+            pos_cmp
+        } else {
+            // zelfde positie: hoogste prioriteit eerst (wordt als eerste getekend)
+            marker_priority(mb.kind).cmp(&marker_priority(ma.kind))
+        }
+    });
+
+    // Welke posities hebben we al getekend? (tolerantie 0.03s)
+    let mut drawn_positions: Vec<f32> = Vec::new();
+
+    for &i in &sorted {
+        let marker = &state.markers[i];
         let px = marker_zone_rect.left() + (marker.position_secs - marker_start_sec) * state.zoom;
         if px < marker_zone_rect.left() - 20.0 || px > marker_zone_rect.right() + 20.0 {
             continue;
@@ -427,39 +470,51 @@ pub fn render_waveform(
             marker_zone_rect.right() - 2.0,
         );
 
-        // Driehoekje — kleur afhankelijk van marker-type
-        let tri_size = 6.0;
-        let cx = px_clamped;
-        let bot = marker_zone_rect.bottom();
-        marker_painter.add(egui::Shape::convex_polygon(
-            vec![
-                egui::pos2(cx, bot),
-                egui::pos2(cx - tri_size, bot - tri_size - 4.0),
-                egui::pos2(cx + tri_size, bot - tri_size - 4.0),
-            ],
-            marker.kind.color(),
-            egui::Stroke::new(1.0, marker.kind.stroke_color()),
-        ));
+        // Bepaal of we al een marker op deze positie hebben getekend
+        let pos_key = (marker.position_secs * 100.0).round() / 100.0; // afronden op 0.01s
+        let already_drawn = drawn_positions
+            .iter()
+            .any(|&dp| (dp - pos_key).abs() < 0.02);
 
-        // Naam — toon prefix als de naam nog de default is
-        let display_name = if marker.name.starts_with(marker.kind.prefix()) {
-            format!(
-                "{}: {}",
-                marker.kind.prefix(),
-                &marker.name[marker.kind.prefix().len() + 1..]
-            )
-        } else {
-            marker.name.clone()
-        };
-        marker_painter.text(
-            egui::pos2(cx, marker_zone_rect.top() + 2.0),
-            egui::Align2::CENTER_TOP,
-            &display_name,
-            egui::TextStyle::Small.resolve(ui.style()),
-            marker.kind.color(),
-        );
+        if !already_drawn {
+            drawn_positions.push(pos_key);
 
-        // Interactie per marker
+            // Driehoekje — kleur van deze marker
+            let tri_size = 6.0;
+            let cx = px_clamped;
+            let bot = marker_zone_rect.bottom();
+            marker_painter.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(cx, bot),
+                    egui::pos2(cx - tri_size, bot - tri_size - 4.0),
+                    egui::pos2(cx + tri_size, bot - tri_size - 4.0),
+                ],
+                marker.kind.color(),
+                egui::Stroke::new(1.0, marker.kind.stroke_color()),
+            ));
+
+            // Naam
+            let display_name = if marker.name.starts_with(marker.kind.prefix())
+                && marker.name.len() > marker.kind.prefix().len()
+            {
+                format!(
+                    "{}: {}",
+                    marker.kind.prefix(),
+                    &marker.name[marker.kind.prefix().len() + 1..]
+                )
+            } else {
+                marker.name.clone()
+            };
+            marker_painter.text(
+                egui::pos2(cx, marker_zone_rect.top() + 2.0),
+                egui::Align2::CENTER_TOP,
+                &display_name,
+                egui::TextStyle::Small.resolve(ui.style()),
+                marker.kind.color(),
+            );
+        }
+
+        // Interactie per marker (altijd voor alle markers, ook verborgen)
         let hit_rect = egui::Rect::from_min_max(
             egui::pos2(px_clamped - 10.0, marker_zone_rect.top()),
             egui::pos2(px_clamped + 10.0, marker_zone_rect.bottom()),
@@ -468,9 +523,8 @@ pub fn render_waveform(
         let marker_resp = ui.interact(hit_rect, marker_id, egui::Sense::click_and_drag());
 
         if marker_resp.clicked() {
-            // Click op marker → seek naar die positie
             seek_action = Some(marker.position_secs.clamp(0.0, state.duration_secs));
-            state.playhead_frames_after_drag = 15; // ✅ FIX
+            state.playhead_frames_after_drag = 15;
         }
         if marker_resp.dragged() {
             if let Some(pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
@@ -483,7 +537,6 @@ pub fn render_waveform(
             marker_to_delete = Some(i);
         }
         if marker_resp.double_clicked() {
-            // Bewerk marker naam
             state.editing_marker = Some(i);
             state.editing_marker_name = marker.name.clone();
         }
@@ -524,12 +577,26 @@ pub fn render_waveform(
             MarkerKind::Section
         };
 
-        let count = state.markers.iter().filter(|m| m.kind == kind).count() + 1;
-        state.markers.push(Marker {
-            name: format!("{}{}", kind.prefix(), count),
-            position_secs: sec,
-            kind,
-        });
+        let tolerance = 0.05_f32;
+        let existing = state
+            .markers
+            .iter()
+            .position(|m| m.kind == kind && (m.position_secs - sec).abs() < tolerance);
+        if let Some(idx) = existing {
+            state.markers.remove(idx);
+        } else {
+            let name = if kind == MarkerKind::Beat {
+                "B".to_string()
+            } else {
+                let count = state.markers.iter().filter(|m| m.kind == kind).count() + 1;
+                format!("{}{}", kind.prefix(), count)
+            };
+            state.markers.push(Marker {
+                name,
+                position_secs: sec,
+                kind,
+            });
+        }
     }
 
     // Verwijder marker bij rechterklik
@@ -673,8 +740,12 @@ pub fn render_waveform(
             let mut max_val = 0.0_f32;
             for s in sample_start..sample_end {
                 let val = state.samples[s];
-                if val < min_val { min_val = val; }
-                if val > max_val { max_val = val; }
+                if val < min_val {
+                    min_val = val;
+                }
+                if val > max_val {
+                    max_val = val;
+                }
             }
             (min_val, max_val)
         };

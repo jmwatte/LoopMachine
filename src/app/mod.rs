@@ -81,6 +81,10 @@ pub struct LoopEditorApp {
     export_state: ExportState,
     export_dialog: FileDialog,
     export_pending: Option<ExportParams>,
+
+    // Loop label rename
+    editing_loop_label: Option<usize>,
+    editing_loop_label_buf: String,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -192,6 +196,8 @@ impl LoopEditorApp {
                 .title("Exporteer loops"),
             export_pending: None,
             confirm_delete_track: None,
+            editing_loop_label: None,
+            editing_loop_label_buf: String::new(),
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -659,26 +665,38 @@ impl eframe::App for LoopEditorApp {
             // ── Marker shortcuts (1-9), Backspace (verwijder dichtstbijzijnde), [ ] (A-B) ──
             if self.waveform_state.path.is_some() {
                 // ── Marker shortcuts: S (Section), M (Measure), B (Beat) ──
+                // Alle drie werken met toggle: druk nogmaals op dezelfde plek om te verwijderen.
+                let tolerance = 0.05_f32;
+                let pos = self.waveform_play_position;
+
                 if self
                     .shortcuts
                     .is_pressed(ShortcutAction::AddSectionMarker, &ctx.input(|i| i.clone()))
                 {
-                    let count = self
-                        .waveform_state
-                        .markers
-                        .iter()
-                        .filter(|m| m.kind == crate::waveform::MarkerKind::Section)
-                        .count()
-                        + 1;
-                    self.waveform_state.markers.push(crate::waveform::Marker {
-                        name: format!("S{}", count),
-                        position_secs: self.waveform_play_position,
-                        kind: crate::waveform::MarkerKind::Section,
+                    let existing = self.waveform_state.markers.iter().position(|m| {
+                        m.kind == crate::waveform::MarkerKind::Section
+                            && (m.position_secs - pos).abs() < tolerance
                     });
+                    if let Some(idx) = existing {
+                        self.waveform_state.markers.remove(idx);
+                        self.status_message = format!("Section marker verwijderd op {:.1}s", pos);
+                    } else {
+                        let count = self
+                            .waveform_state
+                            .markers
+                            .iter()
+                            .filter(|m| m.kind == crate::waveform::MarkerKind::Section)
+                            .count()
+                            + 1;
+                        self.waveform_state.markers.push(crate::waveform::Marker {
+                            name: format!("S{}", count),
+                            position_secs: pos,
+                            kind: crate::waveform::MarkerKind::Section,
+                        });
+                        self.status_message = format!("Section marker op {:.1}s", pos);
+                    }
                     self.push_undo();
                     self.sync_markers_to_library();
-                    self.status_message =
-                        format!("Section marker op {:.1}s", self.waveform_play_position);
                     self.status_message_timer = 3 * 60;
                 }
 
@@ -686,22 +704,30 @@ impl eframe::App for LoopEditorApp {
                     .shortcuts
                     .is_pressed(ShortcutAction::AddMeasureMarker, &ctx.input(|i| i.clone()))
                 {
-                    let count = self
-                        .waveform_state
-                        .markers
-                        .iter()
-                        .filter(|m| m.kind == crate::waveform::MarkerKind::Measure)
-                        .count()
-                        + 1;
-                    self.waveform_state.markers.push(crate::waveform::Marker {
-                        name: format!("M{}", count),
-                        position_secs: self.waveform_play_position,
-                        kind: crate::waveform::MarkerKind::Measure,
+                    let existing = self.waveform_state.markers.iter().position(|m| {
+                        m.kind == crate::waveform::MarkerKind::Measure
+                            && (m.position_secs - pos).abs() < tolerance
                     });
+                    if let Some(idx) = existing {
+                        self.waveform_state.markers.remove(idx);
+                        self.status_message = format!("Measure marker verwijderd op {:.1}s", pos);
+                    } else {
+                        let count = self
+                            .waveform_state
+                            .markers
+                            .iter()
+                            .filter(|m| m.kind == crate::waveform::MarkerKind::Measure)
+                            .count()
+                            + 1;
+                        self.waveform_state.markers.push(crate::waveform::Marker {
+                            name: format!("M{}", count),
+                            position_secs: pos,
+                            kind: crate::waveform::MarkerKind::Measure,
+                        });
+                        self.status_message = format!("Measure marker op {:.1}s", pos);
+                    }
                     self.push_undo();
                     self.sync_markers_to_library();
-                    self.status_message =
-                        format!("Measure marker op {:.1}s", self.waveform_play_position);
                     self.status_message_timer = 3 * 60;
                 }
 
@@ -709,22 +735,23 @@ impl eframe::App for LoopEditorApp {
                     .shortcuts
                     .is_pressed(ShortcutAction::AddBeatMarker, &ctx.input(|i| i.clone()))
                 {
-                    let count = self
-                        .waveform_state
-                        .markers
-                        .iter()
-                        .filter(|m| m.kind == crate::waveform::MarkerKind::Beat)
-                        .count()
-                        + 1;
-                    self.waveform_state.markers.push(crate::waveform::Marker {
-                        name: format!("B{}", count),
-                        position_secs: self.waveform_play_position,
-                        kind: crate::waveform::MarkerKind::Beat,
+                    let existing = self.waveform_state.markers.iter().position(|m| {
+                        m.kind == crate::waveform::MarkerKind::Beat
+                            && (m.position_secs - pos).abs() < tolerance
                     });
+                    if let Some(idx) = existing {
+                        self.waveform_state.markers.remove(idx);
+                        self.status_message = format!("Beat marker verwijderd op {:.1}s", pos);
+                    } else {
+                        self.waveform_state.markers.push(crate::waveform::Marker {
+                            name: "B".to_string(),
+                            position_secs: pos,
+                            kind: crate::waveform::MarkerKind::Beat,
+                        });
+                        self.status_message = format!("Beat marker op {:.1}s", pos);
+                    }
                     self.push_undo();
                     self.sync_markers_to_library();
-                    self.status_message =
-                        format!("Beat marker op {:.1}s", self.waveform_play_position);
                     self.status_message_timer = 3 * 60;
                 }
 
@@ -748,6 +775,61 @@ impl eframe::App for LoopEditorApp {
                         self.sync_markers_to_library();
                         self.status_message = format!("Marker '{}' verwijderd", removed.name);
                         self.status_message_timer = 3 * 60;
+                    }
+                }
+
+                // ── MarkerPrev/MarkerNext — playhead naar vorige/volgende marker ──
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::MarkerPrev, &ctx.input(|i| i.clone()))
+                {
+                    let pos = self.waveform_play_position;
+                    let target = self
+                        .waveform_state
+                        .markers
+                        .iter()
+                        .map(|m| m.position_secs)
+                        .filter(|&p| p < pos - 0.01)
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some(target) = target {
+                        self.waveform_play_position = target;
+                        self.waveform_state.seek_pending = Some(target);
+                        let _ = self
+                            .waveform_cmd_tx
+                            .send(WaveformCommand::Seek { pos_secs: target });
+                        self.waveform_state.playhead_frames_after_drag = 15;
+                        self.status_message = format!("Playhead naar marker op {:.1}s", target);
+                        self.status_message_timer = 2 * 60;
+                    } else {
+                        self.status_message = "Geen marker links van playhead".to_string();
+                        self.status_message_timer = 2 * 60;
+                    }
+                }
+
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::MarkerNext, &ctx.input(|i| i.clone()))
+                {
+                    let pos = self.waveform_play_position;
+                    let target = self
+                        .waveform_state
+                        .markers
+                        .iter()
+                        .map(|m| m.position_secs)
+                        .filter(|&p| p > pos + 0.01)
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some(target) = target {
+                        self.waveform_play_position = target;
+                        self.waveform_state.seek_pending = Some(target);
+                        let _ = self
+                            .waveform_cmd_tx
+                            .send(WaveformCommand::Seek { pos_secs: target });
+                        self.waveform_state.playhead_frames_after_drag = 15;
+                        self.status_message = format!("Playhead naar marker op {:.1}s", target);
+                        self.status_message_timer = 2 * 60;
+                    } else {
+                        self.status_message = "Geen marker rechts van playhead".to_string();
+                        self.status_message_timer = 2 * 60;
                     }
                 }
 
@@ -1431,18 +1513,9 @@ impl eframe::App for LoopEditorApp {
                         .color(Color32::GRAY),
                 );
 
-                // Status rechts uitlijnen
-                if !self.status_message.is_empty() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(&self.status_message)
-                                .size(12.0)
-                                .color(Color32::from_rgb(100, 200, 100)),
-                        );
-                    });
-                }
-
-                // ── Right-side buttons (ARR + Export) ──
+                // ── Right-side buttons + status ──
+                // Alles in 1 right_to_left blok: buttons eerst (meest rechts),
+                // status ernaast (links van de buttons).
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("ARR").clicked() {
                         self.show_arranger ^= true;
@@ -1453,13 +1526,20 @@ impl eframe::App for LoopEditorApp {
                             .track_for_path(self.waveform_state.path.as_ref().unwrap());
                         if !track.loops.is_empty() {
                             if ui
-                                .button("📤 Export")
+                                .button("\u{1F4E4} Export")
                                 .on_hover_text("Exporteer loops naar WAV (Ctrl+E)")
                                 .clicked()
                             {
                                 self.open_export_window();
                             }
                         }
+                    }
+                    if !self.status_message.is_empty() {
+                        ui.label(
+                            RichText::new(&self.status_message)
+                                .size(12.0)
+                                .color(Color32::from_rgb(100, 200, 100)),
+                        );
                     }
                 });
             });
@@ -1552,6 +1632,22 @@ impl eframe::App for LoopEditorApp {
             // Toon bestandsinfo rechts
             if self.waveform_state.path.is_some() {
                 ui.horizontal(|ui| {
+                    // ── Markers op huidige playhead positie ──
+                    let markers_at_pos: Vec<&str> = self
+                        .waveform_state
+                        .markers
+                        .iter()
+                        .filter(|m| (m.position_secs - self.waveform_play_position).abs() < 0.05)
+                        .map(|m| m.name.as_str())
+                        .collect();
+                    if !markers_at_pos.is_empty() {
+                        ui.label(
+                            RichText::new(format!("📍 {}", markers_at_pos.join(", ")))
+                                .size(11.0)
+                                .color(Color32::from_rgb(180, 180, 220)),
+                        );
+                    }
+
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!(
@@ -1808,6 +1904,7 @@ impl eframe::App for LoopEditorApp {
                 } else {
                     let mut delete_idx: Option<usize> = None;
                     let mut load_idx: Option<usize> = None;
+                    let mut rename_op: Option<(usize, String)> = None;
 
                     for (i, saved) in track.loops.iter().enumerate() {
                         ui.horizontal(|ui| {
@@ -1838,11 +1935,33 @@ impl eframe::App for LoopEditorApp {
                                         ui.set_min_size(egui::vec2(10.0, 10.0));
                                     });
                             }
-                            ui.label(
-                                RichText::new(format!("{}{}", id_str, saved.label))
-                                    .size(13.0)
-                                    .strong(),
-                            );
+                            // Loop naam — inline editable via dubbelklik
+                            let is_editing = self.editing_loop_label == Some(i);
+                            if is_editing {
+                                let resp = ui.add(
+                                    egui::TextEdit::singleline(&mut self.editing_loop_label_buf)
+                                        .desired_width(200.0),
+                                );
+                                if resp.lost_focus()
+                                    || ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
+                                {
+                                    if !self.editing_loop_label_buf.is_empty() {
+                                        rename_op = Some((i, self.editing_loop_label_buf.clone()));
+                                    }
+                                    self.editing_loop_label = None;
+                                    self.editing_loop_label_buf.clear();
+                                }
+                            } else {
+                                let label_resp = ui.label(
+                                    RichText::new(format!("{}{}", id_str, saved.label))
+                                        .size(13.0)
+                                        .strong(),
+                                );
+                                if label_resp.double_clicked() {
+                                    self.editing_loop_label = Some(i);
+                                    self.editing_loop_label_buf = saved.label.clone();
+                                }
+                            }
                             ui.label(
                                 RichText::new(format!(
                                     "  {:02}:{:02} → {:02}:{:02}  |  Pitch: {:+.1}  Tempo: {:.2}x",
@@ -1857,6 +1976,20 @@ impl eframe::App for LoopEditorApp {
                                 .color(Color32::GRAY),
                             );
                         });
+                    }
+
+                    if let Some((idx, new_name)) = rename_op {
+                        if let Some(t) = self
+                            .library
+                            .tracks
+                            .iter_mut()
+                            .find(|t| t.track_path == track_path)
+                        {
+                            if idx < t.loops.len() {
+                                t.loops[idx].label = new_name;
+                                crate::loops::save_library(&self.library);
+                            }
+                        }
                     }
 
                     if let Some(idx) = delete_idx {

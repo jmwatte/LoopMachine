@@ -60,6 +60,10 @@ pub enum ShortcutAction {
     SnapLoopLeft,
     SnapLoopRight,
 
+    // Marker navigatie
+    MarkerPrev,
+    MarkerNext,
+
     // Export
     ExportLoops,
 }
@@ -87,9 +91,9 @@ impl ShortcutAction {
             Self::NudgePlayheadRight => "Nudge playhead right",
             Self::CenterLoop => "Center view on loop",
             Self::SaveLoop => "Save current loop",
-            Self::AddSectionMarker => "Add section marker",
-            Self::AddMeasureMarker => "Add measure marker",
-            Self::AddBeatMarker => "Add beat marker",
+            Self::AddSectionMarker => "Toggle section marker (S)",
+            Self::AddMeasureMarker => "Toggle measure marker (M)",
+            Self::AddBeatMarker => "Toggle beat marker (B)",
             Self::DeleteNearestMarker => "Delete nearest marker",
             Self::ZoomIn => "Zoom in",
             Self::ZoomOut => "Zoom out",
@@ -103,6 +107,8 @@ impl ShortcutAction {
             Self::HalveLoopLength => "Halve loop length",
             Self::SnapLoopLeft => "Snap loop to nearest marker left",
             Self::SnapLoopRight => "Snap loop to nearest marker right",
+            Self::MarkerPrev => "Seek playhead to previous marker",
+            Self::MarkerNext => "Seek playhead to next marker",
             Self::ExportLoops => "Export loops...",
         }
     }
@@ -133,7 +139,9 @@ impl ShortcutAction {
             Self::AddSectionMarker
             | Self::AddMeasureMarker
             | Self::AddBeatMarker
-            | Self::DeleteNearestMarker => "Markers",
+            | Self::DeleteNearestMarker
+            | Self::MarkerPrev
+            | Self::MarkerNext => "Markers",
             Self::ZoomIn | Self::ZoomOut | Self::ResetZoom | Self::ShowShortcuts => "View",
             Self::OpenFile => "File",
             Self::Undo | Self::Redo | Self::RestartLoop => "Edit",
@@ -165,6 +173,8 @@ impl ShortcutAction {
             Self::AddMeasureMarker,
             Self::AddBeatMarker,
             Self::DeleteNearestMarker,
+            Self::MarkerPrev,
+            Self::MarkerNext,
             Self::ZoomIn,
             Self::ZoomOut,
             Self::ResetZoom,
@@ -672,6 +682,14 @@ impl Default for ShortcutsConfig {
         bindings.insert(
             ShortcutAction::HalveLoopLength,
             KeyBinding::new(SerializableKey::D).with_ctrl().with_shift(),
+        );
+        bindings.insert(
+            ShortcutAction::MarkerPrev,
+            KeyBinding::new(SerializableKey::ArrowLeft).with_ctrl(),
+        );
+        bindings.insert(
+            ShortcutAction::MarkerNext,
+            KeyBinding::new(SerializableKey::ArrowRight).with_ctrl(),
         );
         bindings.insert(
             ShortcutAction::SnapLoopLeft,
