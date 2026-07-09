@@ -53,6 +53,12 @@ pub enum ShortcutAction {
     Undo,
     Redo,
     RestartLoop,
+    // Loop lengte
+    DoubleLoopLength,
+    HalveLoopLength,
+    // Snap naar markers
+    SnapLoopLeft,
+    SnapLoopRight,
 
     // Export
     ExportLoops,
@@ -93,6 +99,10 @@ impl ShortcutAction {
             Self::Undo => "Undo",
             Self::Redo => "Redo",
             Self::RestartLoop => "Restart loop (seek to A & play)",
+            Self::DoubleLoopLength => "Double loop length",
+            Self::HalveLoopLength => "Halve loop length",
+            Self::SnapLoopLeft => "Snap loop to nearest marker left",
+            Self::SnapLoopRight => "Snap loop to nearest marker right",
             Self::ExportLoops => "Export loops...",
         }
     }
@@ -115,7 +125,11 @@ impl ShortcutAction {
             | Self::NudgePlayheadLeft
             | Self::NudgePlayheadRight
             | Self::CenterLoop
-            | Self::SaveLoop => "Loop",
+            | Self::SaveLoop
+            | Self::DoubleLoopLength
+            | Self::HalveLoopLength
+            | Self::SnapLoopLeft
+            | Self::SnapLoopRight => "Loop",
             Self::AddSectionMarker
             | Self::AddMeasureMarker
             | Self::AddBeatMarker
@@ -161,6 +175,10 @@ impl ShortcutAction {
             Self::RestartLoop,
             Self::CenterLoop,
             Self::SaveLoop,
+            Self::DoubleLoopLength,
+            Self::HalveLoopLength,
+            Self::SnapLoopLeft,
+            Self::SnapLoopRight,
             Self::ExportLoops,
         ]
     }
@@ -646,6 +664,22 @@ impl Default for ShortcutsConfig {
         bindings.insert(
             ShortcutAction::ExportLoops,
             KeyBinding::new(SerializableKey::E).with_ctrl(),
+        );
+        bindings.insert(
+            ShortcutAction::DoubleLoopLength,
+            KeyBinding::new(SerializableKey::D).with_ctrl(),
+        );
+        bindings.insert(
+            ShortcutAction::HalveLoopLength,
+            KeyBinding::new(SerializableKey::D).with_ctrl().with_shift(),
+        );
+        bindings.insert(
+            ShortcutAction::SnapLoopLeft,
+            KeyBinding::new(SerializableKey::Q),
+        );
+        bindings.insert(
+            ShortcutAction::SnapLoopRight,
+            KeyBinding::new(SerializableKey::W),
         );
 
         Self {

@@ -856,6 +856,135 @@ impl eframe::App for LoopEditorApp {
                         self.status_message_timer = 2 * 60;
                     }
                 }
+
+                // ── DoubleLoopLength (Ctrl+D) ──
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::DoubleLoopLength, &ctx.input(|i| i.clone()))
+                {
+                    if let (Some(a), Some(b)) = (
+                        self.waveform_state.loop_a_secs,
+                        self.waveform_state.loop_b_secs,
+                    ) {
+                        if b > a {
+                            let len = b - a;
+                            let new_a = a;
+                            let new_b = (a + len * 2.0).min(self.waveform_state.duration_secs);
+                            self.waveform_state.loop_a_secs = Some(new_a);
+                            self.waveform_state.loop_b_secs = Some(new_b);
+                            let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                                a_secs: new_a,
+                                b_secs: new_b,
+                            });
+                            self.status_message = format!(
+                                "Loop verdubbeld naar {:.1}s–{:.1}s ({:.1}s)",
+                                new_a,
+                                new_b,
+                                new_b - new_a
+                            );
+                            self.status_message_timer = 3 * 60;
+                        }
+                    } else {
+                        self.status_message = "Geen A-B loop om te verdubbelen".to_string();
+                        self.status_message_timer = 2 * 60;
+                    }
+                }
+
+                // ── HalveLoopLength (Ctrl+Shift+D) ──
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::HalveLoopLength, &ctx.input(|i| i.clone()))
+                {
+                    if let (Some(a), Some(b)) = (
+                        self.waveform_state.loop_a_secs,
+                        self.waveform_state.loop_b_secs,
+                    ) {
+                        if b > a {
+                            let len = b - a;
+                            let new_a = a;
+                            let new_b = a + len / 2.0;
+                            if new_b > new_a {
+                                self.waveform_state.loop_a_secs = Some(new_a);
+                                self.waveform_state.loop_b_secs = Some(new_b);
+                                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                                    a_secs: new_a,
+                                    b_secs: new_b,
+                                });
+                                self.status_message = format!(
+                                    "Loop gehalveerd naar {:.1}s–{:.1}s ({:.1}s)",
+                                    new_a,
+                                    new_b,
+                                    new_b - new_a
+                                );
+                                self.status_message_timer = 3 * 60;
+                            }
+                        }
+                    } else {
+                        self.status_message = "Geen A-B loop om te halveren".to_string();
+                        self.status_message_timer = 2 * 60;
+                    }
+                }
+
+                // ── SnapLoopLeft (Q) — snap A naar dichtstbijzijnde marker links ──
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::SnapLoopLeft, &ctx.input(|i| i.clone()))
+                {
+                    if let Some(a) = self.waveform_state.loop_a_secs {
+                        let nearest_left = self
+                            .waveform_state
+                            .markers
+                            .iter()
+                            .map(|m| m.position_secs)
+                            .filter(|&pos| pos < a)
+                            .max_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+                        if let Some(target) = nearest_left {
+                            let delta = a - target;
+                            self.waveform_state.loop_a_secs = Some(target);
+                            if let Some(b) = self.waveform_state.loop_b_secs {
+                                self.waveform_state.loop_b_secs = Some((b - delta).max(0.0));
+                            }
+                            self.sync_loop_bounds();
+                            self.status_message =
+                                format!("Loop gesnapt naar marker op {:.1}s", target);
+                            self.status_message_timer = 3 * 60;
+                        } else {
+                            self.status_message = "Geen marker links van de loop".to_string();
+                            self.status_message_timer = 2 * 60;
+                        }
+                    }
+                }
+
+                // ── SnapLoopRight (W) — snap A naar dichtstbijzijnde marker rechts ──
+                if self
+                    .shortcuts
+                    .is_pressed(ShortcutAction::SnapLoopRight, &ctx.input(|i| i.clone()))
+                {
+                    if let Some(a) = self.waveform_state.loop_a_secs {
+                        let nearest_right = self
+                            .waveform_state
+                            .markers
+                            .iter()
+                            .map(|m| m.position_secs)
+                            .filter(|&pos| pos > a)
+                            .min_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+                        if let Some(target) = nearest_right {
+                            let delta = target - a;
+                            self.waveform_state.loop_a_secs = Some(target);
+                            if let Some(b) = self.waveform_state.loop_b_secs {
+                                self.waveform_state.loop_b_secs =
+                                    Some((b + delta).min(self.waveform_state.duration_secs));
+                            }
+                            self.sync_loop_bounds();
+                            self.status_message =
+                                format!("Loop gesnapt naar marker op {:.1}s", target);
+                            self.status_message_timer = 3 * 60;
+                        } else {
+                            self.status_message = "Geen marker rechts van de loop".to_string();
+                            self.status_message_timer = 2 * 60;
+                        }
+                    }
+                }
             }
 
             // ── Nudge marker A links/rechts (J / Shift+J) ──
@@ -1682,6 +1811,14 @@ impl eframe::App for LoopEditorApp {
 
                     for (i, saved) in track.loops.iter().enumerate() {
                         ui.horizontal(|ui| {
+                            // Knoppen vooraan (links)
+                            if ui.small_button("▶").clicked() {
+                                load_idx = Some(i);
+                            }
+                            if ui.small_button("❌").clicked() {
+                                delete_idx = Some(i);
+                            }
+
                             // Toon short_id met gekleurd blokje
                             let id_str = saved
                                 .short_id
@@ -1718,17 +1855,6 @@ impl eframe::App for LoopEditorApp {
                                 ))
                                 .size(11.0)
                                 .color(Color32::GRAY),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.small_button("❌").clicked() {
-                                        delete_idx = Some(i);
-                                    }
-                                    if ui.small_button("▶").clicked() {
-                                        load_idx = Some(i);
-                                    }
-                                },
                             );
                         });
                     }
