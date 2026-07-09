@@ -896,6 +896,7 @@ impl eframe::App for LoopEditorApp {
                         self.status_message =
                             format!("Loop genudget ← naar {:.1}s–{:.1}s", new_a, new_b);
                         self.status_message_timer = 3 * 60;
+                        self.center_view_on_loop(self.last_panel_width);
                     } else {
                         self.status_message = "Geen A-B loop ingesteld om te nudgen".to_string();
                         self.status_message_timer = 2 * 60;
@@ -933,6 +934,7 @@ impl eframe::App for LoopEditorApp {
                         self.status_message =
                             format!("Loop genudget → naar {:.1}s–{:.1}s", new_a, new_b);
                         self.status_message_timer = 3 * 60;
+                        self.center_view_on_loop(self.last_panel_width);
                     } else {
                         self.status_message = "Geen A-B loop ingesteld om te nudgen".to_string();
                         self.status_message_timer = 2 * 60;
