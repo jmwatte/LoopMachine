@@ -3,6 +3,14 @@ use std::sync::{Mutex, OnceLock};
 
 static FFT_PLANNER: OnceLock<Mutex<FftPlanner<f32>>> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromaMode {
+    /// Volledig frequentiespectrum
+    Full,
+    /// Alleen basfrequenties (40–250 Hz) — vangt lage E/F op basgitaar
+    Bass,
+}
+
 /// Chroma resultaat: 12 waarden (C, C#, D, ..., B) van 0.0 tot 1.0
 #[derive(Debug, Clone, Copy)]
 pub struct Chroma(pub [f32; 12]);
@@ -92,18 +100,20 @@ impl Chroma {
         let suffix = if is_minor { "m" } else { "" };
         format!("{} {}", note, suffix)
     }
-
-}/// Bereken chroma voor een slice audio.
+}
+/// Bereken chroma voor een slice audio.
 /// `samples` = mono f32 samples, `sample_rate` = sample rate in Hz.
 /// `start_sec` / `end_sec` = tijdbereik in seconden.
+/// `mode` = `ChromaMode::Full` (volledig spectrum) of `ChromaMode::Bass` (alleen 60–250 Hz).
 pub fn detect_chroma(
     samples: &[f32],
     sample_rate: u32,
     start_sec: Option<f32>,
     end_sec: Option<f32>,
+    mode: ChromaMode,
 ) -> Chroma {
-    let fft_size = 4096;
-    let hop_size = 2048;
+    let fft_size = 8192;
+    let hop_size = 4096;
 
     let start_sample = start_sec
         .map(|s| (s * sample_rate as f32) as usize)
@@ -120,6 +130,16 @@ pub fn detect_chroma(
 
     let planner = FFT_PLANNER.get_or_init(|| Mutex::new(FftPlanner::new()));
     let fft = planner.lock().unwrap().plan_fft_forward(fft_size);
+
+    // Bereken frequentiebereik voor bass-modus
+    let freq_per_bin = sample_rate as f32 / fft_size as f32;
+    let (bin_start, bin_end) = if mode == ChromaMode::Bass {
+        let start = (40.0 / freq_per_bin) as usize; // ~40 Hz (vangt lage E/F op bas)
+        let end = (250.0 / freq_per_bin) as usize; // ~250 Hz
+        (start.max(1), end.min(fft_size / 2))
+    } else {
+        (1, fft_size / 2)
+    };
 
     let mut chroma_sum = [0.0_f64; 12];
     let mut _frame_count = 0_u32;
@@ -140,8 +160,8 @@ pub fn detect_chroma(
 
         fft.process(&mut buffer);
 
-        // Energie per FFT bin (alleen positieve frequenties)
-        for bin in 1..(fft_size / 2) {
+        // Energie per FFT bin (alleen relevante bins)
+        for bin in bin_start..bin_end {
             let energy = buffer[bin].norm_sqr();
             if energy < 1e-12 {
                 continue;
@@ -153,7 +173,9 @@ pub fn detect_chroma(
             // Chroma: log2(freq / 440) * 12 + 9  (C = 0, A = 9)
             let chroma_raw = (freq / 440.0).log2() * 12.0 + 9.0;
             let note_f = chroma_raw.rem_euclid(12.0);
-            let note_idx = note_f as usize % 12;
+            // ✅ Fix: afronden i.p.v. afkappen — voorkomt dat een licht ongestemde A (439 Hz)
+            //    als G# wordt geïnterpreteerd.
+            let note_idx = (note_f + 0.5) as usize % 12;
 
             chroma_sum[note_idx] += energy as f64;
         }

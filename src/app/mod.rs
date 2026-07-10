@@ -4,7 +4,7 @@ pub mod ui_library;
 pub mod ui_shortcuts;
 use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
-use crate::chroma::{detect_chroma, Chroma};
+use crate::chroma::{detect_chroma, Chroma, ChromaMode};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
@@ -38,6 +38,8 @@ pub struct LoopEditorApp {
 
     // Chroma detectie
     pub chroma_result: Option<Chroma>,
+    /// Bass-only chroma (60–250 Hz) voor robuustere toonaarddetectie
+    pub bass_chroma: Option<Chroma>,
 
     // File path input
     pub file_path: String,
@@ -151,6 +153,7 @@ impl LoopEditorApp {
             active_loop_idx: None,
             pending_loop_point: None,
             chroma_result: None,
+            bass_chroma: None,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -268,6 +271,7 @@ impl LoopEditorApp {
                 self.active_loop_idx = None;
                 self.pending_loop_point = None;
                 self.chroma_result = None;
+                self.bass_chroma = None;
                 self.save_session();
 
                 let mut msg = format!(
@@ -2048,13 +2052,13 @@ impl eframe::App for LoopEditorApp {
                     let a = self.waveform_state.loop_a_secs;
                     let b = self.waveform_state.loop_b_secs;
                     if !samples.is_empty() && sr > 0 {
-                        self.chroma_result = Some(detect_chroma(samples, sr, a, b));
-                        if let Some(chroma) = self.chroma_result {
-                            let key = chroma.key_name();
-                            self.status_message = format!(
-                                "🔍 Meest waarschijnlijke toonsoort: {}",
-                                key,
-                            );
+                        self.chroma_result =
+                            Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
+                        self.bass_chroma = Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
+                        if let Some(bass) = self.bass_chroma {
+                            let key = bass.key_name();
+                            self.status_message =
+                                format!("🔍 Meest waarschijnlijke toonsoort: {}", key,);
                             self.status_message_timer = 5 * 60;
                         }
                     }
@@ -2067,6 +2071,7 @@ impl eframe::App for LoopEditorApp {
                         ui.label(RichText::new("Toonhoogtes (chroma)").size(12.0).strong());
                         if ui.small_button("❌").clicked() {
                             self.chroma_result = None;
+                            self.bass_chroma = None;
                         }
                     });
                     let bar_max_width = ui.available_width().min(300.0);
@@ -2096,15 +2101,26 @@ impl eframe::App for LoopEditorApp {
                             );
                         });
                     }
-                    let (root, is_minor, _) = chroma.detect_key();
+                    // Gebruik bas-chroma voor toonaarddetectie (beter voor blues/pop)
+                    let key_chroma = self.bass_chroma.unwrap_or(chroma);
+                    let (root, is_minor, _) = key_chroma.detect_key();
                     let key_note = Chroma::note_name(root);
                     let suffix = if is_minor { "m" } else { "" };
                     let (peak_note, peak_conf) = chroma.peak();
                     let peak_name = Chroma::note_name(peak_note);
+                    let mode_label = if self.bass_chroma.is_some() {
+                        " (bas)"
+                    } else {
+                        ""
+                    };
                     ui.label(
                         RichText::new(format!(
-                            "→ Toonsoort: {} {}  |  Sterkste noot: {} ({:.0}%)",
-                            key_note, suffix, peak_name, peak_conf * 100.0,
+                            "→ Toonsoort{}: {} {}  |  Sterkste noot: {} ({:.0}%)",
+                            mode_label,
+                            key_note,
+                            suffix,
+                            peak_name,
+                            peak_conf * 100.0,
                         ))
                         .size(14.0)
                         .strong()
