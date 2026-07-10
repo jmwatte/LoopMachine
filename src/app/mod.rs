@@ -2050,12 +2050,10 @@ impl eframe::App for LoopEditorApp {
                     if !samples.is_empty() && sr > 0 {
                         self.chroma_result = Some(detect_chroma(samples, sr, a, b));
                         if let Some(chroma) = self.chroma_result {
-                            let (note, conf) = chroma.peak();
-                            let name = Chroma::note_name(note);
+                            let key = chroma.key_name();
                             self.status_message = format!(
-                                "🔍 Meest waarschijnlijke noot: {} ({:.0}% zeker)",
-                                name,
-                                conf * 100.0
+                                "🔍 Meest waarschijnlijke toonsoort: {}",
+                                key,
                             );
                             self.status_message_timer = 5 * 60;
                         }
@@ -2065,7 +2063,12 @@ impl eframe::App for LoopEditorApp {
                 // ── Chroma visualisatie ──
                 if let Some(chroma) = self.chroma_result {
                     ui.separator();
-                    ui.label(RichText::new("Toonhoogtes (chroma)").size(12.0).strong());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Toonhoogtes (chroma)").size(12.0).strong());
+                        if ui.small_button("❌").clicked() {
+                            self.chroma_result = None;
+                        }
+                    });
                     let bar_max_width = ui.available_width().min(300.0);
                     for i in 0..12 {
                         let val = chroma.0[i];
@@ -2076,8 +2079,8 @@ impl eframe::App for LoopEditorApp {
                         let name = Chroma::note_name(i);
                         let name_nl = Chroma::note_name_nl(i);
                         let (r, g, b) = match i % 12 {
-                            0 | 2 | 4 | 5 | 7 | 9 | 11 => (220, 180, 50), // witte toetsen
-                            _ => (100, 100, 100),                         // zwarte toetsen
+                            0 | 2 | 4 | 5 | 7 | 9 | 11 => (220, 180, 50),
+                            _ => (100, 100, 100),
                         };
                         ui.horizontal(|ui| {
                             ui.label(
@@ -2093,18 +2096,20 @@ impl eframe::App for LoopEditorApp {
                             );
                         });
                     }
-                    if let Some((note, conf)) = chroma.compact(0.2).first().copied() {
-                        ui.label(
-                            RichText::new(format!(
-                                "→ Meest waarschijnlijk: {} ({:.0}%)",
-                                Chroma::note_name(note),
-                                conf * 100.0
-                            ))
-                            .size(14.0)
-                            .strong()
-                            .color(Color32::from_rgb(100, 200, 100)),
-                        );
-                    }
+                    let (root, is_minor, _) = chroma.detect_key();
+                    let key_note = Chroma::note_name(root);
+                    let suffix = if is_minor { "m" } else { "" };
+                    let (peak_note, peak_conf) = chroma.peak();
+                    let peak_name = Chroma::note_name(peak_note);
+                    ui.label(
+                        RichText::new(format!(
+                            "→ Toonsoort: {} {}  |  Sterkste noot: {} ({:.0}%)",
+                            key_note, suffix, peak_name, peak_conf * 100.0,
+                        ))
+                        .size(14.0)
+                        .strong()
+                        .color(Color32::from_rgb(100, 200, 100)),
+                    );
                 }
 
                 // ── Notities voor de actieve loop ──

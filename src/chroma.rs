@@ -32,6 +32,7 @@ impl Chroma {
     }
 
     /// Genereer een compacte weergave: alleen noten > drempel
+    #[allow(dead_code)]
     pub fn compact(&self, threshold: f32) -> Vec<(usize, f32)> {
         self.0
             .iter()
@@ -40,9 +41,59 @@ impl Chroma {
             .map(|(i, &v)| (i, v))
             .collect()
     }
-}
+    /// Detecteer de meest waarschijnlijke toonsoort met Krumhansl-Schmuckler.
+    /// Geeft (root_index, is_minor, confidence) terug.
+    pub fn detect_key(&self) -> (usize, bool, f32) {
+        // Krumhansl-Schmuckler key profiles (Krumhansl, 1990)
+        let major_profile: [f32; 12] = [
+            6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+        ];
+        let minor_profile: [f32; 12] = [
+            6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
+        ];
 
-/// Bereken chroma voor een slice audio.
+        let mut best_corr = -1.0f32;
+        let mut best_root = 0usize;
+        let mut best_is_minor = false;
+
+        for root in 0..12 {
+            // Major
+            let mut corr = 0.0;
+            for i in 0..12 {
+                let profile_idx = (i + 12 - root) % 12;
+                corr += self.0[i] * major_profile[profile_idx];
+            }
+            if corr > best_corr {
+                best_corr = corr;
+                best_root = root;
+                best_is_minor = false;
+            }
+
+            // Minor
+            corr = 0.0;
+            for i in 0..12 {
+                let profile_idx = (i + 12 - root) % 12;
+                corr += self.0[i] * minor_profile[profile_idx];
+            }
+            if corr > best_corr {
+                best_corr = corr;
+                best_root = root;
+                best_is_minor = true;
+            }
+        }
+
+        (best_root, best_is_minor, best_corr)
+    }
+
+    /// Toon de toonsoort als leesbare string.
+    pub fn key_name(&self) -> String {
+        let (root, is_minor, _conf) = self.detect_key();
+        let note = Self::note_name(root);
+        let suffix = if is_minor { "m" } else { "" };
+        format!("{} {}", note, suffix)
+    }
+
+}/// Bereken chroma voor een slice audio.
 /// `samples` = mono f32 samples, `sample_rate` = sample rate in Hz.
 /// `start_sec` / `end_sec` = tijdbereik in seconden.
 pub fn detect_chroma(
