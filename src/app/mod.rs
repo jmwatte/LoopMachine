@@ -40,7 +40,6 @@ pub struct LoopEditorApp {
     pub chroma_result: Option<Chroma>,
     /// Bass-only chroma (60–250 Hz) voor robuustere toonaarddetectie
     pub bass_chroma: Option<Chroma>,
-
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -2056,8 +2055,9 @@ impl eframe::App for LoopEditorApp {
                             Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
                         self.bass_chroma = Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
                         if let Some(bass) = self.bass_chroma {
-                            let top = bass.top_candidates(3);
-                            let keys: String = top
+                            let ks_top = bass.top_candidates(3);
+                            let lk_top = bass.top_candidates_lk(3);
+                            let ks_keys: String = ks_top
                                 .iter()
                                 .map(|(r, m, c)| {
                                     format!(
@@ -2067,8 +2067,19 @@ impl eframe::App for LoopEditorApp {
                                     )
                                 })
                                 .collect::<Vec<_>>()
-                                .join(", ");
-                            self.status_message = format!("🔍 Toonaard: {}", keys);
+                                .join(" | ");
+                            let lk_keys: String = lk_top
+                                .iter()
+                                .map(|(r, m, c)| {
+                                    format!(
+                                        "{} ({:.0}%)",
+                                        Chroma::key_name_static(*r, *m),
+                                        c * 100.0
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" | ");
+                            self.status_message = format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
                             self.status_message_timer = 5 * 60;
                         }
                     }
@@ -2115,14 +2126,9 @@ impl eframe::App for LoopEditorApp {
                     let key_chroma = self.bass_chroma.unwrap_or(chroma);
                     let (peak_note, peak_conf) = chroma.peak();
                     let peak_name = Chroma::note_name(peak_note);
-                    let mode_label = if self.bass_chroma.is_some() {
-                        " (bas)"
-                    } else {
-                        ""
-                    };
-                    // Top 4 kandidaten tonen (exact, quint, relatief, parallel)
-                    let candidates = key_chroma.top_candidates(4);
-                    let cand_text: String = candidates
+                    // Krumhansl-Schmuckler (klassiek)
+                    let ks_cand = key_chroma.top_candidates(4);
+                    let ks_text: String = ks_cand
                         .iter()
                         .map(|(r, m, c)| {
                             format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
@@ -2130,16 +2136,33 @@ impl eframe::App for LoopEditorApp {
                         .collect::<Vec<_>>()
                         .join(" | ");
                     ui.label(
-                        RichText::new(format!(
-                            "→ Toonsoort{}: {}  |  Sterkste noot: {} ({:.0}%)",
-                            mode_label,
-                            cand_text,
-                            peak_name,
-                            peak_conf * 100.0,
-                        ))
-                        .size(14.0)
-                        .strong()
-                        .color(Color32::from_rgb(100, 200, 100)),
+                        RichText::new(format!("K-S:  {}  ", ks_text))
+                            .size(14.0)
+                            .strong()
+                            .color(Color32::from_rgb(100, 200, 100)),
+                    );
+
+                    // libkeyfinder (moderner, beter voor blues/pop)
+                    let lk_cand = key_chroma.top_candidates_lk(4);
+                    let lk_text: String = lk_cand
+                        .iter()
+                        .map(|(r, m, c)| {
+                            format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    ui.label(
+                        RichText::new(format!("LK: {}  ", lk_text))
+                            .size(14.0)
+                            .strong()
+                            .color(Color32::from_rgb(220, 180, 80)),
+                    );
+
+                    // Sterkste noot
+                    ui.label(
+                        RichText::new(format!("Peak: {} ({:.0}%)", peak_name, peak_conf * 100.0))
+                            .size(12.0)
+                            .color(Color32::GRAY),
                     );
                 }
 

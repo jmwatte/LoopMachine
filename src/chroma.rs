@@ -49,23 +49,33 @@ impl Chroma {
             .map(|(i, &v)| (i, v))
             .collect()
     }
-    /// Bereken correlatie met Krumhansl-Schmuckler profielen voor alle 24 toonaarden.
-    /// Geeft Vec van (root, is_minor, correlation 0..1) gesorteerd van hoog naar laag.
-    fn all_correlations(&self) -> Vec<(usize, bool, f32)> {
-        let major_profile: [f32; 12] = [
-            6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
-        ];
-        let minor_profile: [f32; 12] = [
-            6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
-        ];
+    /// Krumhansl-Schmuckler profielen (klassiek, westers)
+    const KS_MAJOR: [f32; 12] = [
+        6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+    ];
+    const KS_MINOR: [f32; 12] = [
+        6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
+    ];
 
-        // Normalisatiefactor: som van profielwaarden (max mogelijke correlatie)
+    /// libkeyfinder profielen (gebaseerd op grotere dataset, beter voor blues/pop)
+    const LK_MAJOR: [f32; 12] = [
+        7.239, 3.504, 3.584, 2.845, 5.819, 4.559, 2.448, 6.995, 3.391, 4.556, 4.074, 4.459,
+    ];
+    const LK_MINOR: [f32; 12] = [
+        7.003, 3.144, 4.359, 5.404, 3.672, 4.090, 3.908, 6.200, 3.634, 2.872, 5.355, 3.832,
+    ];
+
+    /// Bereken correlaties met gegeven profielen voor alle 24 toonaarden.
+    fn correlations_for(
+        &self,
+        major_profile: &[f32; 12],
+        minor_profile: &[f32; 12],
+    ) -> Vec<(usize, bool, f32)> {
         let total_major: f32 = major_profile.iter().sum();
         let total_minor: f32 = minor_profile.iter().sum();
 
         let mut results = Vec::with_capacity(24);
         for root in 0..12 {
-            // Major
             let mut corr_maj = 0.0;
             for i in 0..12 {
                 let profile_idx = (i + 12 - root) % 12;
@@ -73,7 +83,6 @@ impl Chroma {
             }
             results.push((root, false, corr_maj / total_major));
 
-            // Minor
             let mut corr_min = 0.0;
             for i in 0..12 {
                 let profile_idx = (i + 12 - root) % 12;
@@ -86,17 +95,20 @@ impl Chroma {
         results
     }
 
-    /// Detecteer de meest waarschijnlijke toonsoort.
-    /// Geeft (root_index, is_minor, confidence 0..1) terug.
-    #[allow(dead_code)]
-    pub fn detect_key(&self) -> (usize, bool, f32) {
-        let best = self.all_correlations()[0];
-        (best.0, best.1, best.2)
+    /// Top N kandidaten met Krumhansl-Schmuckler profielen.
+    pub fn top_candidates(&self, n: usize) -> Vec<(usize, bool, f32)> {
+        self.correlations_for(&Self::KS_MAJOR, &Self::KS_MINOR)
+            .into_iter()
+            .take(n)
+            .collect()
     }
 
-    /// Top N toonaard-kandidaten met score, van hoog naar laag.
-    pub fn top_candidates(&self, n: usize) -> Vec<(usize, bool, f32)> {
-        self.all_correlations().into_iter().take(n).collect()
+    /// Top N kandidaten met libkeyfinder profielen (beter voor blues/pop).
+    pub fn top_candidates_lk(&self, n: usize) -> Vec<(usize, bool, f32)> {
+        self.correlations_for(&Self::LK_MAJOR, &Self::LK_MINOR)
+            .into_iter()
+            .take(n)
+            .collect()
     }
 
     /// Toon een toonsoort als leesbare string.
@@ -106,11 +118,14 @@ impl Chroma {
         format!("{} {}", note, suffix)
     }
 
-    /// Toon de beste toonsoort als leesbare string.
-    #[allow(dead_code)]
+    /// Toon de beste toonsoort als leesbare string (Krumhansl-Schmuckler).
     pub fn key_name(&self) -> String {
-        let (root, is_minor, _) = self.detect_key();
-        Self::key_name_static(root, is_minor)
+        let best = self.top_candidates(1);
+        if let Some(&(r, m, _)) = best.first() {
+            Self::key_name_static(r, m)
+        } else {
+            "? ?".to_string()
+        }
     }
 }
 /// Bereken chroma voor een slice audio.
