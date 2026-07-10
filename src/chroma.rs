@@ -49,10 +49,9 @@ impl Chroma {
             .map(|(i, &v)| (i, v))
             .collect()
     }
-    /// Detecteer de meest waarschijnlijke toonsoort met Krumhansl-Schmuckler.
-    /// Geeft (root_index, is_minor, confidence) terug.
-    pub fn detect_key(&self) -> (usize, bool, f32) {
-        // Krumhansl-Schmuckler key profiles (Krumhansl, 1990)
+    /// Bereken correlatie met Krumhansl-Schmuckler profielen voor alle 24 toonaarden.
+    /// Geeft Vec van (root, is_minor, correlation 0..1) gesorteerd van hoog naar laag.
+    fn all_correlations(&self) -> Vec<(usize, bool, f32)> {
         let major_profile: [f32; 12] = [
             6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
         ];
@@ -60,45 +59,58 @@ impl Chroma {
             6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
         ];
 
-        let mut best_corr = -1.0f32;
-        let mut best_root = 0usize;
-        let mut best_is_minor = false;
+        // Normalisatiefactor: som van profielwaarden (max mogelijke correlatie)
+        let total_major: f32 = major_profile.iter().sum();
+        let total_minor: f32 = minor_profile.iter().sum();
 
+        let mut results = Vec::with_capacity(24);
         for root in 0..12 {
             // Major
-            let mut corr = 0.0;
+            let mut corr_maj = 0.0;
             for i in 0..12 {
                 let profile_idx = (i + 12 - root) % 12;
-                corr += self.0[i] * major_profile[profile_idx];
+                corr_maj += self.0[i] * major_profile[profile_idx];
             }
-            if corr > best_corr {
-                best_corr = corr;
-                best_root = root;
-                best_is_minor = false;
-            }
+            results.push((root, false, corr_maj / total_major));
 
             // Minor
-            corr = 0.0;
+            let mut corr_min = 0.0;
             for i in 0..12 {
                 let profile_idx = (i + 12 - root) % 12;
-                corr += self.0[i] * minor_profile[profile_idx];
+                corr_min += self.0[i] * minor_profile[profile_idx];
             }
-            if corr > best_corr {
-                best_corr = corr;
-                best_root = root;
-                best_is_minor = true;
-            }
+            results.push((root, true, corr_min / total_minor));
         }
 
-        (best_root, best_is_minor, best_corr)
+        results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        results
     }
 
-    /// Toon de toonsoort als leesbare string.
-    pub fn key_name(&self) -> String {
-        let (root, is_minor, _conf) = self.detect_key();
+    /// Detecteer de meest waarschijnlijke toonsoort.
+    /// Geeft (root_index, is_minor, confidence 0..1) terug.
+    #[allow(dead_code)]
+    pub fn detect_key(&self) -> (usize, bool, f32) {
+        let best = self.all_correlations()[0];
+        (best.0, best.1, best.2)
+    }
+
+    /// Top N toonaard-kandidaten met score, van hoog naar laag.
+    pub fn top_candidates(&self, n: usize) -> Vec<(usize, bool, f32)> {
+        self.all_correlations().into_iter().take(n).collect()
+    }
+
+    /// Toon een toonsoort als leesbare string.
+    pub fn key_name_static(root: usize, is_minor: bool) -> String {
         let note = Self::note_name(root);
         let suffix = if is_minor { "m" } else { "" };
         format!("{} {}", note, suffix)
+    }
+
+    /// Toon de beste toonsoort als leesbare string.
+    #[allow(dead_code)]
+    pub fn key_name(&self) -> String {
+        let (root, is_minor, _) = self.detect_key();
+        Self::key_name_static(root, is_minor)
     }
 }
 /// Bereken chroma voor een slice audio.

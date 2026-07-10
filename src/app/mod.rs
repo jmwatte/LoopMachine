@@ -2056,9 +2056,19 @@ impl eframe::App for LoopEditorApp {
                             Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
                         self.bass_chroma = Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
                         if let Some(bass) = self.bass_chroma {
-                            let key = bass.key_name();
-                            self.status_message =
-                                format!("🔍 Meest waarschijnlijke toonsoort: {}", key,);
+                            let top = bass.top_candidates(3);
+                            let keys: String = top
+                                .iter()
+                                .map(|(r, m, c)| {
+                                    format!(
+                                        "{} ({:.0}%)",
+                                        Chroma::key_name_static(*r, *m),
+                                        c * 100.0
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            self.status_message = format!("🔍 Toonaard: {}", keys);
                             self.status_message_timer = 5 * 60;
                         }
                     }
@@ -2103,9 +2113,6 @@ impl eframe::App for LoopEditorApp {
                     }
                     // Gebruik bas-chroma voor toonaarddetectie (beter voor blues/pop)
                     let key_chroma = self.bass_chroma.unwrap_or(chroma);
-                    let (root, is_minor, _) = key_chroma.detect_key();
-                    let key_note = Chroma::note_name(root);
-                    let suffix = if is_minor { "m" } else { "" };
                     let (peak_note, peak_conf) = chroma.peak();
                     let peak_name = Chroma::note_name(peak_note);
                     let mode_label = if self.bass_chroma.is_some() {
@@ -2113,12 +2120,20 @@ impl eframe::App for LoopEditorApp {
                     } else {
                         ""
                     };
+                    // Top 4 kandidaten tonen (exact, quint, relatief, parallel)
+                    let candidates = key_chroma.top_candidates(4);
+                    let cand_text: String = candidates
+                        .iter()
+                        .map(|(r, m, c)| {
+                            format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
                     ui.label(
                         RichText::new(format!(
-                            "→ Toonsoort{}: {} {}  |  Sterkste noot: {} ({:.0}%)",
+                            "→ Toonsoort{}: {}  |  Sterkste noot: {} ({:.0}%)",
                             mode_label,
-                            key_note,
-                            suffix,
+                            cand_text,
                             peak_name,
                             peak_conf * 100.0,
                         ))
