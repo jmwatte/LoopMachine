@@ -1,4 +1,6 @@
 use rustfft::{num_complex::Complex, FftPlanner};
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 static FFT_PLANNER: OnceLock<Mutex<FftPlanner<f32>>> = OnceLock::new();
@@ -221,4 +223,96 @@ pub fn detect_chroma(
     }
 
     Chroma(result)
+}
+
+/// Zoek het pad naar keyfinder-cli.exe.
+/// Eerst naast de huidige executable, dan fallback naar working directory.
+pub fn find_keyfinder_cli() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    // Relatief t.o.v. de executable (target/debug/ of target/release/)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if let Some(gp) = parent.parent() {
+                if let Some(ggp) = gp.parent() {
+                    candidates.push(ggp.join("keyfinder").join("keyfinder-cli.exe"));
+                }
+            }
+            // Naast de executable zelf
+            candidates.push(parent.join("keyfinder-cli.exe"));
+        }
+    }
+    // Relatief t.o.v. working directory
+    candidates.push(PathBuf::from("keyfinder/keyfinder-cli.exe"));
+    // Probeer ook keyfinder.dll in dezelfde map als de exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("keyfinder").join("keyfinder-cli.exe"));
+        }
+    }
+    for path in &candidates {
+        if path.exists() {
+            return Some(path.clone());
+        }
+    }
+    None
+}
+
+/// Roep keyfinder-cli.exe aan voor toonaarddetectie op een audiobestand.
+/// Geeft Ok(toonaard) bij succes (bv. "A", "Bbm", "C#"), of Err(foutmelding) bij probleem.
+pub fn detect_key_via_cli(audio_path: &str) -> Result<String, String> {
+    let cli_path = find_keyfinder_cli().ok_or_else(|| {
+        format!(
+            "keyfinder-cli.exe niet gevonden (gezocht in exe-pad en '{}')",
+            std::env::current_dir()
+                .map(|p| p
+                    .join("keyfinder")
+                    .join("keyfinder-cli.exe")
+                    .to_string_lossy()
+                    .to_string())
+                .unwrap_or_default()
+        )
+    })?;
+    let output = Command::new(&cli_path)
+        .arg("-n")
+        .arg("standard")
+        .arg(audio_path)
+        .output()
+        .map_err(|e| format!("Kan keyfinder-cli niet starten: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "keyfinder-cli gaf foutcode {}{}",
+            output
+                .status
+                .code()
+                .map(|c| format!(" ({})", c))
+                .unwrap_or_default(),
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", stderr.trim())
+            }
+        ));
+    }
+    // Parse output: negeer "Samples loaded" regel, neem laatste niet-lege regel
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}\n{}", stdout, stderr);
+    let key = combined
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("Samples loaded")
+        })
+        .last()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if key.is_empty() {
+        Err(format!(
+            "keyfinder-cli gaf onverwachte output: '{}'",
+            combined.trim()
+        ))
+    } else {
+        Ok(key)
+    }
 }

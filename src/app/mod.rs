@@ -4,7 +4,7 @@ pub mod ui_library;
 pub mod ui_shortcuts;
 use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
-use crate::chroma::{detect_chroma, Chroma, ChromaMode};
+use crate::chroma::{detect_chroma, detect_key_via_cli, Chroma, ChromaMode};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
@@ -40,6 +40,8 @@ pub struct LoopEditorApp {
     pub chroma_result: Option<Chroma>,
     /// Bass-only chroma (60–250 Hz) voor robuustere toonaarddetectie
     pub bass_chroma: Option<Chroma>,
+    /// Keyfinder-cli resultaat (externe toonaarddetectie)
+    pub keyfinder_cli_result: Option<String>,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -153,6 +155,7 @@ impl LoopEditorApp {
             pending_loop_point: None,
             chroma_result: None,
             bass_chroma: None,
+            keyfinder_cli_result: None,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -271,6 +274,7 @@ impl LoopEditorApp {
                 self.pending_loop_point = None;
                 self.chroma_result = None;
                 self.bass_chroma = None;
+                self.keyfinder_cli_result = None;
                 self.save_session();
 
                 let mut msg = format!(
@@ -2082,6 +2086,22 @@ impl eframe::App for LoopEditorApp {
                             self.status_message = format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
                             self.status_message_timer = 5 * 60;
                         }
+                        // Keyfinder-cli externe detectie
+                        if let Some(ref path) = self.waveform_state.path.clone() {
+                            match detect_key_via_cli(path) {
+                                Ok(kf_key) => {
+                                    self.keyfinder_cli_result = Some(kf_key.clone());
+                                    self.status_message =
+                                        format!("{}  |  KF: {}", self.status_message, kf_key);
+                                }
+                                Err(e) => {
+                                    self.keyfinder_cli_result = None;
+                                    self.status_message =
+                                        format!("{}  |  KF-fout: {}", self.status_message, e);
+                                    self.status_message_timer = 5 * 60;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -2156,6 +2176,19 @@ impl eframe::App for LoopEditorApp {
                             .size(14.0)
                             .strong()
                             .color(Color32::from_rgb(220, 180, 80)),
+                    );
+
+                    // Keyfinder-cli (externe tool)
+                    let kf_text = self
+                        .keyfinder_cli_result
+                        .as_ref()
+                        .map(|k| k.as_str())
+                        .unwrap_or("(niet beschikbaar)");
+                    ui.label(
+                        RichText::new(format!("KF:  {}  ", kf_text))
+                            .size(14.0)
+                            .strong()
+                            .color(Color32::from_rgb(180, 140, 220)),
                     );
 
                     // Sterkste noot
