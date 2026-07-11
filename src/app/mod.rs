@@ -40,8 +40,8 @@ pub struct LoopEditorApp {
     pub chroma_result: Option<Chroma>,
     /// Bass-only chroma (60–250 Hz) voor robuustere toonaarddetectie
     pub bass_chroma: Option<Chroma>,
-    /// Keyfinder-cli resultaat (externe toonaarddetectie)
-    pub keyfinder_cli_result: Option<String>,
+    /// Keyfinder-cli resultaat: None=nog niet uitgevoerd, Some(Ok(key))=gelukt, Some(Err(e)))=fout
+    pub keyfinder_cli_result: Option<Result<String, String>>,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -1898,81 +1898,85 @@ impl eframe::App for LoopEditorApp {
                 }
             });
 
-            // ── Track Paneel (onder de knoppen) ──
-            if let Some(ref path) = self.waveform_state.path.clone() {
-                let track_path = path.clone();
-                ui.separator();
+            // ── Track Paneel (onder de knoppen) — scrollbaar als venster klein is ──
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(ref path) = self.waveform_state.path.clone() {
+                    let track_path = path.clone();
+                    ui.separator();
 
-                // ── Opgeslagen Loops (altijd zichtbaar) ──
-                ui.strong("Opgeslagen Loops");
-                let track = self.library.track_for_path(&track_path);
-                if track.loops.is_empty() {
-                    ui.label(
-                        "Nog geen loops opgeslagen. Maak een A-B selectie en klik 'Save Loop'.",
-                    );
-                } else {
-                    let mut delete_idx: Option<usize> = None;
-                    let mut load_idx: Option<usize> = None;
-                    let mut rename_op: Option<(usize, String)> = None;
+                    // ── Opgeslagen Loops (altijd zichtbaar) ──
+                    ui.strong("Opgeslagen Loops");
+                    let track = self.library.track_for_path(&track_path);
+                    if track.loops.is_empty() {
+                        ui.label(
+                            "Nog geen loops opgeslagen. Maak een A-B selectie en klik 'Save Loop'.",
+                        );
+                    } else {
+                        let mut delete_idx: Option<usize> = None;
+                        let mut load_idx: Option<usize> = None;
+                        let mut rename_op: Option<(usize, String)> = None;
 
-                    for (i, saved) in track.loops.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            // Knoppen vooraan (links)
-                            if ui.small_button("▶").clicked() {
-                                load_idx = Some(i);
-                            }
-                            if ui.small_button("❌").clicked() {
-                                delete_idx = Some(i);
-                            }
+                        for (i, saved) in track.loops.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                // Knoppen vooraan (links)
+                                if ui.small_button("▶").clicked() {
+                                    load_idx = Some(i);
+                                }
+                                if ui.small_button("❌").clicked() {
+                                    delete_idx = Some(i);
+                                }
 
-                            // Toon short_id met gekleurd blokje
-                            let id_str = saved
-                                .short_id
-                                .as_deref()
-                                .map(|id| format!("({}) ", id))
-                                .unwrap_or_default();
-                            let col = saved
-                                .short_id
-                                .as_deref()
-                                .map(|id| color_for_arranger(id, &track_path));
-                            if let Some([r, g, b]) = col {
-                                let color = Color32::from_rgb(r, g, b);
-                                egui::Frame::default()
-                                    .fill(color)
-                                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(80)))
-                                    .show(ui, |ui| {
-                                        ui.set_min_size(egui::vec2(10.0, 10.0));
-                                    });
-                            }
-                            // Loop naam — inline editable via dubbelklik
-                            let is_editing = self.editing_loop_label == Some(i);
-                            if is_editing {
-                                let resp = ui.add(
-                                    egui::TextEdit::singleline(&mut self.editing_loop_label_buf)
+                                // Toon short_id met gekleurd blokje
+                                let id_str = saved
+                                    .short_id
+                                    .as_deref()
+                                    .map(|id| format!("({}) ", id))
+                                    .unwrap_or_default();
+                                let col = saved
+                                    .short_id
+                                    .as_deref()
+                                    .map(|id| color_for_arranger(id, &track_path));
+                                if let Some([r, g, b]) = col {
+                                    let color = Color32::from_rgb(r, g, b);
+                                    egui::Frame::default()
+                                        .fill(color)
+                                        .stroke(egui::Stroke::new(1.0, Color32::from_gray(80)))
+                                        .show(ui, |ui| {
+                                            ui.set_min_size(egui::vec2(10.0, 10.0));
+                                        });
+                                }
+                                // Loop naam — inline editable via dubbelklik
+                                let is_editing = self.editing_loop_label == Some(i);
+                                if is_editing {
+                                    let resp = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.editing_loop_label_buf,
+                                        )
                                         .desired_width(200.0),
-                                );
-                                if resp.lost_focus()
-                                    || ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
-                                {
-                                    if !self.editing_loop_label_buf.is_empty() {
-                                        rename_op = Some((i, self.editing_loop_label_buf.clone()));
+                                    );
+                                    if resp.lost_focus()
+                                        || ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        if !self.editing_loop_label_buf.is_empty() {
+                                            rename_op =
+                                                Some((i, self.editing_loop_label_buf.clone()));
+                                        }
+                                        self.editing_loop_label = None;
+                                        self.editing_loop_label_buf.clear();
                                     }
-                                    self.editing_loop_label = None;
-                                    self.editing_loop_label_buf.clear();
+                                } else {
+                                    let label_resp = ui.label(
+                                        RichText::new(format!("{}{}", id_str, saved.label))
+                                            .size(13.0)
+                                            .strong(),
+                                    );
+                                    if label_resp.double_clicked() {
+                                        self.editing_loop_label = Some(i);
+                                        self.editing_loop_label_buf = saved.label.clone();
+                                    }
                                 }
-                            } else {
-                                let label_resp = ui.label(
-                                    RichText::new(format!("{}{}", id_str, saved.label))
-                                        .size(13.0)
-                                        .strong(),
-                                );
-                                if label_resp.double_clicked() {
-                                    self.editing_loop_label = Some(i);
-                                    self.editing_loop_label_buf = saved.label.clone();
-                                }
-                            }
-                            ui.label(
-                                RichText::new(format!(
+                                ui.label(
+                                    RichText::new(format!(
                                     "  {:02}:{:02} → {:02}:{:02}  |  Pitch: {:+.1}  Tempo: {:.2}x",
                                     (saved.loop_a_secs / 60.0) as u32,
                                     saved.loop_a_secs as u32 % 60,
@@ -1981,259 +1985,280 @@ impl eframe::App for LoopEditorApp {
                                     saved.pitch_semitones,
                                     saved.tempo,
                                 ))
-                                .size(11.0)
-                                .color(Color32::GRAY),
-                            );
-                        });
-                    }
-
-                    if let Some((idx, new_name)) = rename_op {
-                        if let Some(t) = self
-                            .library
-                            .tracks
-                            .iter_mut()
-                            .find(|t| t.track_path == track_path)
-                        {
-                            if idx < t.loops.len() {
-                                t.loops[idx].label = new_name;
-                                crate::loops::save_library(&self.library);
-                            }
-                        }
-                    }
-
-                    if let Some(idx) = delete_idx {
-                        let track = self.library.track_for_path(&track_path);
-                        if idx < track.loops.len() {
-                            track.loops.remove(idx);
-                            crate::loops::save_library(&self.library);
-                        }
-                    }
-
-                    if let Some(idx) = load_idx {
-                        let saved = {
-                            let track = self.library.track_for_path(&track_path);
-                            track.loops.get(idx).cloned()
-                        };
-                        if let Some(saved) = saved {
-                            self.waveform_state.loop_a_secs = Some(saved.loop_a_secs);
-                            self.waveform_state.loop_b_secs = Some(saved.loop_b_secs);
-                            self.waveform_state.pitch_semitones = saved.pitch_semitones;
-                            self.waveform_state.tempo = saved.tempo;
-                            self.waveform_play_position = saved.loop_a_secs;
-                            self.waveform_state.seek_pending = Some(saved.loop_a_secs);
-                            self.waveform_state.playhead_frames_after_drag = 15;
-
-                            let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
-                                a_secs: saved.loop_a_secs,
-                                b_secs: saved.loop_b_secs,
+                                    .size(11.0)
+                                    .color(Color32::GRAY),
+                                );
                             });
-                            if self.waveform_has_content {
-                                let _ = self.waveform_cmd_tx.send(WaveformCommand::Seek {
-                                    pos_secs: saved.loop_a_secs,
-                                });
-                            }
-                            self.status_message = format!("Loop '{}' geladen", saved.label);
-                            self.status_message_timer = 3 * 60;
-                            self.active_loop_idx = Some(idx);
-                            self.center_view_on_loop(panel_width);
                         }
-                    }
-                }
 
-                // ── Chroma detectie knop ──
-                if ui
-                    .button(if self.chroma_result.is_some() {
-                        "🔄 Opnieuw detecteren"
-                    } else {
-                        "🔍 Detecteer noten"
-                    })
-                    .on_hover_text("Analyseer de A-B selectie op toonhoogtes")
-                    .clicked()
-                {
-                    let samples = &self.waveform_state.samples;
-                    let sr = self.waveform_state.sample_rate;
-                    let a = self.waveform_state.loop_a_secs;
-                    let b = self.waveform_state.loop_b_secs;
-                    if !samples.is_empty() && sr > 0 {
-                        self.chroma_result =
-                            Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
-                        self.bass_chroma = Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
-                        if let Some(bass) = self.bass_chroma {
-                            let ks_top = bass.top_candidates(3);
-                            let lk_top = bass.top_candidates_lk(3);
-                            let ks_keys: String = ks_top
-                                .iter()
-                                .map(|(r, m, c)| {
-                                    format!(
-                                        "{} ({:.0}%)",
-                                        Chroma::key_name_static(*r, *m),
-                                        c * 100.0
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" | ");
-                            let lk_keys: String = lk_top
-                                .iter()
-                                .map(|(r, m, c)| {
-                                    format!(
-                                        "{} ({:.0}%)",
-                                        Chroma::key_name_static(*r, *m),
-                                        c * 100.0
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" | ");
-                            self.status_message = format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
-                            self.status_message_timer = 5 * 60;
-                        }
-                        // Keyfinder-cli externe detectie
-                        if let Some(ref path) = self.waveform_state.path.clone() {
-                            match detect_key_via_cli(path) {
-                                Ok(kf_key) => {
-                                    self.keyfinder_cli_result = Some(kf_key.clone());
-                                    self.status_message =
-                                        format!("{}  |  KF: {}", self.status_message, kf_key);
-                                }
-                                Err(e) => {
-                                    self.keyfinder_cli_result = None;
-                                    self.status_message =
-                                        format!("{}  |  KF-fout: {}", self.status_message, e);
-                                    self.status_message_timer = 5 * 60;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── Chroma visualisatie ──
-                if let Some(chroma) = self.chroma_result {
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Toonhoogtes (chroma)").size(12.0).strong());
-                        if ui.small_button("❌").clicked() {
-                            self.chroma_result = None;
-                            self.bass_chroma = None;
-                        }
-                    });
-                    let bar_max_width = ui.available_width().min(300.0);
-                    for i in 0..12 {
-                        let val = chroma.0[i];
-                        if val < 0.01 {
-                            continue;
-                        }
-                        let bar_width = bar_max_width * val;
-                        let name = Chroma::note_name(i);
-                        let name_nl = Chroma::note_name_nl(i);
-                        let (r, g, b) = match i % 12 {
-                            0 | 2 | 4 | 5 | 7 | 9 | 11 => (220, 180, 50),
-                            _ => (100, 100, 100),
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!("{:>3} ({})", name, name_nl))
-                                    .size(13.0)
-                                    .color(Color32::from_rgb(r, g, b)),
-                            );
-                            let _ = egui::Frame::none().fill(Color32::from_rgb(r, g, b)).show(
-                                ui,
-                                |ui| {
-                                    ui.set_min_size(egui::vec2(bar_width.max(2.0), 12.0));
-                                },
-                            );
-                        });
-                    }
-                    // Gebruik bas-chroma voor toonaarddetectie (beter voor blues/pop)
-                    let key_chroma = self.bass_chroma.unwrap_or(chroma);
-                    let (peak_note, peak_conf) = chroma.peak();
-                    let peak_name = Chroma::note_name(peak_note);
-                    // Krumhansl-Schmuckler (klassiek)
-                    let ks_cand = key_chroma.top_candidates(4);
-                    let ks_text: String = ks_cand
-                        .iter()
-                        .map(|(r, m, c)| {
-                            format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" | ");
-                    ui.label(
-                        RichText::new(format!("K-S:  {}  ", ks_text))
-                            .size(14.0)
-                            .strong()
-                            .color(Color32::from_rgb(100, 200, 100)),
-                    );
-
-                    // libkeyfinder (moderner, beter voor blues/pop)
-                    let lk_cand = key_chroma.top_candidates_lk(4);
-                    let lk_text: String = lk_cand
-                        .iter()
-                        .map(|(r, m, c)| {
-                            format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" | ");
-                    ui.label(
-                        RichText::new(format!("LK: {}  ", lk_text))
-                            .size(14.0)
-                            .strong()
-                            .color(Color32::from_rgb(220, 180, 80)),
-                    );
-
-                    // Keyfinder-cli (externe tool)
-                    let kf_text = self
-                        .keyfinder_cli_result
-                        .as_ref()
-                        .map(|k| k.as_str())
-                        .unwrap_or("(niet beschikbaar)");
-                    ui.label(
-                        RichText::new(format!("KF:  {}  ", kf_text))
-                            .size(14.0)
-                            .strong()
-                            .color(Color32::from_rgb(180, 140, 220)),
-                    );
-
-                    // Sterkste noot
-                    ui.label(
-                        RichText::new(format!("Peak: {} ({:.0}%)", peak_name, peak_conf * 100.0))
-                            .size(12.0)
-                            .color(Color32::GRAY),
-                    );
-                }
-
-                // ── Notities voor de actieve loop ──
-                if let Some(idx) = self.active_loop_idx {
-                    let track = self.library.track_for_path(&track_path);
-                    if idx < track.loops.len() {
-                        let label = track.loops[idx].label.clone();
-                        let notes = track.loops[idx].notes.clone();
-                        let mut current_notes = notes.clone();
-
-                        ui.separator();
-                        ui.label(
-                            RichText::new(format!("📝 Notities: {}", label))
-                                .size(12.0)
-                                .strong(),
-                        );
-                        let resp = ui.add_sized(
-                            egui::vec2(ui.available_width(), 100.0),
-                            egui::TextEdit::multiline(&mut current_notes)
-                                .hint_text("Akkoorden, noten, transcripties..."),
-                        );
-                        if resp.lost_focus() || resp.changed() {
-                            if let Some(track) = self
+                        if let Some((idx, new_name)) = rename_op {
+                            if let Some(t) = self
                                 .library
                                 .tracks
                                 .iter_mut()
                                 .find(|t| t.track_path == track_path)
                             {
-                                if idx < track.loops.len() {
-                                    track.loops[idx].notes = current_notes;
+                                if idx < t.loops.len() {
+                                    t.loops[idx].label = new_name;
                                     crate::loops::save_library(&self.library);
                                 }
                             }
                         }
+
+                        if let Some(idx) = delete_idx {
+                            let track = self.library.track_for_path(&track_path);
+                            if idx < track.loops.len() {
+                                track.loops.remove(idx);
+                                crate::loops::save_library(&self.library);
+                            }
+                        }
+
+                        if let Some(idx) = load_idx {
+                            let saved = {
+                                let track = self.library.track_for_path(&track_path);
+                                track.loops.get(idx).cloned()
+                            };
+                            if let Some(saved) = saved {
+                                self.waveform_state.loop_a_secs = Some(saved.loop_a_secs);
+                                self.waveform_state.loop_b_secs = Some(saved.loop_b_secs);
+                                self.waveform_state.pitch_semitones = saved.pitch_semitones;
+                                self.waveform_state.tempo = saved.tempo;
+                                self.waveform_play_position = saved.loop_a_secs;
+                                self.waveform_state.seek_pending = Some(saved.loop_a_secs);
+                                self.waveform_state.playhead_frames_after_drag = 15;
+
+                                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                                    a_secs: saved.loop_a_secs,
+                                    b_secs: saved.loop_b_secs,
+                                });
+                                if self.waveform_has_content {
+                                    let _ = self.waveform_cmd_tx.send(WaveformCommand::Seek {
+                                        pos_secs: saved.loop_a_secs,
+                                    });
+                                }
+                                self.status_message = format!("Loop '{}' geladen", saved.label);
+                                self.status_message_timer = 3 * 60;
+                                self.active_loop_idx = Some(idx);
+                                self.center_view_on_loop(panel_width);
+                            }
+                        }
                     }
-                }
-            } // end if let Some(path)
+
+                    // ── Chroma detectie knop ──
+                    if ui
+                        .button(if self.chroma_result.is_some() {
+                            "🔄 Opnieuw detecteren"
+                        } else {
+                            "🔍 Detecteer noten"
+                        })
+                        .on_hover_text("Analyseer de A-B selectie op toonhoogtes")
+                        .clicked()
+                    {
+                        let samples = &self.waveform_state.samples;
+                        let sr = self.waveform_state.sample_rate;
+                        let a = self.waveform_state.loop_a_secs;
+                        let b = self.waveform_state.loop_b_secs;
+                        if !samples.is_empty() && sr > 0 {
+                            self.chroma_result =
+                                Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
+                            self.bass_chroma =
+                                Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
+                            if let Some(bass) = self.bass_chroma {
+                                let ks_top = bass.top_candidates(3);
+                                let lk_top = bass.top_candidates_lk(3);
+                                let ks_keys: String = ks_top
+                                    .iter()
+                                    .map(|(r, m, c)| {
+                                        format!(
+                                            "{} ({:.0}%)",
+                                            Chroma::key_name_static(*r, *m),
+                                            c * 100.0
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" | ");
+                                let lk_keys: String = lk_top
+                                    .iter()
+                                    .map(|(r, m, c)| {
+                                        format!(
+                                            "{} ({:.0}%)",
+                                            Chroma::key_name_static(*r, *m),
+                                            c * 100.0
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" | ");
+                                self.status_message =
+                                    format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
+                                self.status_message_timer = 5 * 60;
+                            }
+                            // Keyfinder-cli externe detectie (via temp WAV, omzeilt FFmpeg decodeerproblemen)
+                            if !samples.is_empty() && sr > 0 {
+                                match detect_key_via_cli(samples, sr, a, b) {
+                                    Ok(kf_key) => {
+                                        self.keyfinder_cli_result = Some(Ok(kf_key.clone()));
+                                        self.status_message =
+                                            format!("{}  |  KF: {}", self.status_message, kf_key);
+                                    }
+                                    Err(e) => {
+                                        self.keyfinder_cli_result = Some(Err(e.clone()));
+                                        self.status_message =
+                                            format!("{}  |  KF-fout: {}", self.status_message, e);
+                                        self.status_message_timer = 5 * 60;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Chroma visualisatie ──
+                    if let Some(chroma) = self.chroma_result {
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Toonhoogtes (chroma)").size(12.0).strong());
+                            if ui.small_button("❌").clicked() {
+                                self.chroma_result = None;
+                                self.bass_chroma = None;
+                            }
+                        });
+                        let bar_max_width = ui.available_width().min(300.0);
+                        for i in 0..12 {
+                            let val = chroma.0[i];
+                            if val < 0.01 {
+                                continue;
+                            }
+                            let bar_width = bar_max_width * val;
+                            let name = Chroma::note_name(i);
+                            let name_nl = Chroma::note_name_nl(i);
+                            let (r, g, b) = match i % 12 {
+                                0 | 2 | 4 | 5 | 7 | 9 | 11 => (220, 180, 50),
+                                _ => (100, 100, 100),
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{:>3} ({})", name, name_nl))
+                                        .size(13.0)
+                                        .color(Color32::from_rgb(r, g, b)),
+                                );
+                                let _ = egui::Frame::none().fill(Color32::from_rgb(r, g, b)).show(
+                                    ui,
+                                    |ui| {
+                                        ui.set_min_size(egui::vec2(bar_width.max(2.0), 12.0));
+                                    },
+                                );
+                            });
+                        }
+                        // Gebruik bas-chroma voor toonaarddetectie (beter voor blues/pop)
+                        let key_chroma = self.bass_chroma.unwrap_or(chroma);
+                        let (peak_note, peak_conf) = chroma.peak();
+                        let peak_name = Chroma::note_name(peak_note);
+                        // Krumhansl-Schmuckler (klassiek)
+                        let ks_cand = key_chroma.top_candidates(4);
+                        let ks_text: String = ks_cand
+                            .iter()
+                            .map(|(r, m, c)| {
+                                format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                        ui.label(
+                            RichText::new(format!("K-S:  {}  ", ks_text))
+                                .size(14.0)
+                                .strong()
+                                .color(Color32::from_rgb(100, 200, 100)),
+                        );
+
+                        // libkeyfinder (moderner, beter voor blues/pop)
+                        let lk_cand = key_chroma.top_candidates_lk(4);
+                        let lk_text: String = lk_cand
+                            .iter()
+                            .map(|(r, m, c)| {
+                                format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                        ui.label(
+                            RichText::new(format!("LK: {}  ", lk_text))
+                                .size(14.0)
+                                .strong()
+                                .color(Color32::from_rgb(220, 180, 80)),
+                        );
+
+                        // Keyfinder-cli (externe tool)
+                        match &self.keyfinder_cli_result {
+                            Some(Ok(key)) => {
+                                ui.label(
+                                    RichText::new(format!("KF:  {}  ", key))
+                                        .size(14.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(180, 140, 220)),
+                                );
+                            }
+                            Some(Err(e)) => {
+                                ui.label(
+                                    RichText::new(format!("KF:  ❌ {}", e))
+                                        .size(13.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(220, 80, 80)),
+                                );
+                            }
+                            None => {
+                                ui.label(
+                                    RichText::new("KF:  (niet beschikbaar)")
+                                        .size(13.0)
+                                        .color(Color32::GRAY),
+                                );
+                            }
+                        }
+
+                        // Sterkste noot
+                        ui.label(
+                            RichText::new(format!(
+                                "Peak: {} ({:.0}%)",
+                                peak_name,
+                                peak_conf * 100.0
+                            ))
+                            .size(12.0)
+                            .color(Color32::GRAY),
+                        );
+                    }
+
+                    // ── Notities voor de actieve loop ──
+                    if let Some(idx) = self.active_loop_idx {
+                        let track = self.library.track_for_path(&track_path);
+                        if idx < track.loops.len() {
+                            let label = track.loops[idx].label.clone();
+                            let notes = track.loops[idx].notes.clone();
+                            let mut current_notes = notes.clone();
+
+                            ui.separator();
+                            ui.label(
+                                RichText::new(format!("📝 Notities: {}", label))
+                                    .size(12.0)
+                                    .strong(),
+                            );
+                            let resp = ui.add_sized(
+                                egui::vec2(ui.available_width(), 100.0),
+                                egui::TextEdit::multiline(&mut current_notes)
+                                    .hint_text("Akkoorden, noten, transcripties..."),
+                            );
+                            if resp.lost_focus() || resp.changed() {
+                                if let Some(track) = self
+                                    .library
+                                    .tracks
+                                    .iter_mut()
+                                    .find(|t| t.track_path == track_path)
+                                {
+                                    if idx < track.loops.len() {
+                                        track.loops[idx].notes = current_notes;
+                                        crate::loops::save_library(&self.library);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } // end if let Some(path)
+            }); // end ScrollArea
         }); // end CentralPanel.show()
 
         self.show_library_window(ctx);

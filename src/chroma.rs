@@ -257,9 +257,51 @@ pub fn find_keyfinder_cli() -> Option<PathBuf> {
     None
 }
 
-/// Roep keyfinder-cli.exe aan voor toonaarddetectie op een audiobestand.
+/// Schrijf mono f32 samples naar een tijdelijke WAV-file en retourneer het pad.
+fn write_temp_wav(samples: &[f32], sample_rate: u32) -> Result<std::path::PathBuf, String> {
+    use hound::{SampleFormat, WavSpec, WavWriter};
+    use std::fs;
+
+    let tmp_dir = std::env::temp_dir();
+    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Kan temp map niet aanmaken: {}", e))?;
+
+    let path = tmp_dir.join("loopmachine_kf_temp.wav");
+
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    };
+
+    let mut writer =
+        WavWriter::create(&path, spec).map_err(|e| format!("Kan temp WAV niet maken: {}", e))?;
+
+    for &s in samples {
+        writer
+            .write_sample(s)
+            .map_err(|e| format!("Fout bij schrijven WAV: {}", e))?;
+    }
+
+    writer
+        .finalize()
+        .map_err(|e| format!("Fout bij finalizen WAV: {}", e))?;
+    Ok(path)
+}
+
+/// Roep keyfinder-cli.exe aan voor toonaarddetectie.
 /// Geeft Ok(toonaard) bij succes (bv. "A", "Bbm", "C#"), of Err(foutmelding) bij probleem.
-pub fn detect_key_via_cli(audio_path: &str) -> Result<String, String> {
+/// Als `start_sec` en `end_sec` zijn ingesteld, wordt alleen dat stuk geanalyseerd.
+pub fn detect_key_via_cli(
+    samples: &[f32],
+    sample_rate: u32,
+    start_sec: Option<f32>,
+    end_sec: Option<f32>,
+) -> Result<String, String> {
+    if samples.is_empty() {
+        return Err("Geen audiogesamples beschikbaar".to_string());
+    }
+
     let cli_path = find_keyfinder_cli().ok_or_else(|| {
         format!(
             "keyfinder-cli.exe niet gevonden (gezocht in exe-pad en '{}')",
@@ -272,12 +314,39 @@ pub fn detect_key_via_cli(audio_path: &str) -> Result<String, String> {
                 .unwrap_or_default()
         )
     })?;
-    let output = Command::new(&cli_path)
-        .arg("-n")
-        .arg("standard")
-        .arg(audio_path)
+
+    // Bepaal welk stuk samples we naar WAV schrijven (A-B selectie of hele file)
+    let start_sample = start_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(0)
+        .min(samples.len().saturating_sub(1));
+    let end_sample = end_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(samples.len())
+        .min(samples.len());
+    let slice = if end_sample > start_sample {
+        &samples[start_sample..end_sample]
+    } else {
+        samples
+    };
+
+    // Schrijf samples naar tijdelijke WAV
+    let wav_path = write_temp_wav(slice, sample_rate)?;
+
+    // Zoek de map van de CLI (voor DLLs) en stel die in als working directory
+    let cli_dir = cli_path.parent().map(|p| p.to_path_buf());
+    let mut cmd = Command::new(&cli_path);
+    cmd.arg("-n").arg("standard").arg(&wav_path);
+    if let Some(ref dir) = cli_dir {
+        cmd.current_dir(dir);
+    }
+    let output = cmd
         .output()
         .map_err(|e| format!("Kan keyfinder-cli niet starten: {}", e))?;
+
+    // Opruimen: verwijder temp WAV
+    let _ = std::fs::remove_file(&wav_path);
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
@@ -294,7 +363,7 @@ pub fn detect_key_via_cli(audio_path: &str) -> Result<String, String> {
             }
         ));
     }
-    // Parse output: negeer "Samples loaded" regel, neem laatste niet-lege regel
+    // Parse output: negeer "Samples loaded" regel en andere info-regels
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}\n{}", stdout, stderr);
@@ -302,14 +371,18 @@ pub fn detect_key_via_cli(audio_path: &str) -> Result<String, String> {
         .lines()
         .filter(|l| {
             let t = l.trim();
-            !t.is_empty() && !t.starts_with("Samples loaded")
+            !t.is_empty()
+                && !t.starts_with("Samples loaded")
+                && !t.starts_with("Samplerate")
+                && !t.starts_with("Channels")
+                && !t.starts_with("Duration")
         })
         .last()
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     if key.is_empty() {
         Err(format!(
-            "keyfinder-cli gaf onverwachte output: '{}'",
+            "keyfinder-cli gaf geen herkenbare output: '{}'",
             combined.trim()
         ))
     } else {
