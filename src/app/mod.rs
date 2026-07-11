@@ -73,6 +73,8 @@ pub struct LoopEditorApp {
 
     // File dialog (egui-native)
     pub file_dialog: FileDialog,
+    /// Laatst gebruikte directory voor file dialog
+    pub file_dialog_last_dir: Option<String>,
 
     // Arranger
     pub show_arranger: bool,
@@ -172,15 +174,18 @@ impl LoopEditorApp {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             last_panel_width: 800.0,
-            file_dialog: FileDialog::new().add_file_filter(
-                "Audio",
-                std::sync::Arc::new(|p: &std::path::Path| {
-                    matches!(
-                        p.extension().and_then(|s| s.to_str()),
-                        Some("mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma")
-                    )
-                }),
-            ),
+            file_dialog: FileDialog::new()
+                .add_file_filter(
+                    "Audio",
+                    std::sync::Arc::new(|p: &std::path::Path| {
+                        matches!(
+                            p.extension().and_then(|s| s.to_str()),
+                            Some("mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma")
+                        )
+                    }),
+                )
+                .default_file_filter("Audio"),
+            file_dialog_last_dir: None,
             show_arranger: false,
             active_arrangement: None,
             arrangements: crate::arrangement::load_arrangements(),
@@ -229,6 +234,13 @@ impl LoopEditorApp {
                 }
             }
             app.arr_parse_buf = session.arr_parse_buf;
+            // Herstel laatste directory voor file dialog
+            if let Some(ref dir) = session.last_directory {
+                if Path::new(dir).exists() {
+                    app.file_dialog_last_dir = Some(dir.clone());
+                    app.file_dialog.config_mut().initial_directory = std::path::PathBuf::from(dir);
+                }
+            }
         }
 
         app
@@ -437,6 +449,7 @@ impl LoopEditorApp {
             self.waveform_state.volume,
             &mode_str,
             &self.arr_parse_buf,
+            self.file_dialog_last_dir.as_deref(),
         );
     }
 
@@ -2319,6 +2332,13 @@ impl eframe::App for LoopEditorApp {
             };
             self.file_path = path_str.clone();
             self.load_file(&path_str);
+            // Onthoud de directory voor volgende keer
+            if let Some(parent) = path.parent() {
+                let dir = parent.to_string_lossy().to_string();
+                self.file_dialog_last_dir = Some(dir.clone());
+                self.file_dialog.config_mut().initial_directory = parent.to_path_buf();
+                self.save_session();
+            }
         }
 
         // ── Export Window ──

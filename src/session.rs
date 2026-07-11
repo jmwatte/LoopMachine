@@ -17,6 +17,9 @@ pub struct SessionState {
     /// Arranger parse tekstveld, bewaard tussen sessies.
     #[serde(default)]
     pub arr_parse_buf: String,
+    /// Laatst gebruikte directory voor file dialog.
+    #[serde(default)]
+    pub last_directory: Option<String>,
 }
 
 impl SessionState {
@@ -32,6 +35,7 @@ impl SessionState {
         volume: f32,
         channel_mode: &str,
         arr_parse_buf: &str,
+        last_directory: Option<&str>,
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),
@@ -45,6 +49,7 @@ impl SessionState {
             volume,
             channel_mode: channel_mode.to_string(),
             arr_parse_buf: arr_parse_buf.to_string(),
+            last_directory: last_directory.map(|s| s.to_string()),
         };
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             let _ = std::fs::write(SESSION_FILE, json);
