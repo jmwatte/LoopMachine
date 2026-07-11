@@ -4,7 +4,7 @@ pub mod ui_library;
 pub mod ui_shortcuts;
 use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
-use crate::chroma::{detect_chroma, detect_key_via_cli, Chroma, ChromaMode};
+use crate::chroma::{detect_bpm, detect_chroma, detect_key_via_cli, Chroma, ChromaMode};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
@@ -42,6 +42,8 @@ pub struct LoopEditorApp {
     pub bass_chroma: Option<Chroma>,
     /// Keyfinder-cli resultaat: None=nog niet uitgevoerd, Some(Ok(key))=gelukt, Some(Err(e)))=fout
     pub keyfinder_cli_result: Option<Result<String, String>>,
+    /// BPM detectie resultaat (SoundTouch)
+    pub bpm_result: Option<f32>,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -156,6 +158,7 @@ impl LoopEditorApp {
             chroma_result: None,
             bass_chroma: None,
             keyfinder_cli_result: None,
+            bpm_result: None,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -275,6 +278,7 @@ impl LoopEditorApp {
                 self.chroma_result = None;
                 self.bass_chroma = None;
                 self.keyfinder_cli_result = None;
+                self.bpm_result = None;
                 self.save_session();
 
                 let mut msg = format!(
@@ -2118,6 +2122,14 @@ impl eframe::App for LoopEditorApp {
                                     }
                                 }
                             }
+                            // BPM detectie (SoundTouch)
+                            if !samples.is_empty() && sr > 0 {
+                                self.bpm_result = detect_bpm(samples, sr, a, b);
+                                if let Some(bpm) = self.bpm_result {
+                                    self.status_message =
+                                        format!("{}  |  BPM: {:.1}", self.status_message, bpm);
+                                }
+                            }
                         }
                     }
 
@@ -2215,6 +2227,25 @@ impl eframe::App for LoopEditorApp {
                             None => {
                                 ui.label(
                                     RichText::new("KF:  (niet beschikbaar)")
+                                        .size(13.0)
+                                        .color(Color32::GRAY),
+                                );
+                            }
+                        }
+
+                        // BPM (SoundTouch)
+                        match self.bpm_result {
+                            Some(bpm) => {
+                                ui.label(
+                                    RichText::new(format!("BPM: {:.1}", bpm))
+                                        .size(14.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(120, 200, 220)),
+                                );
+                            }
+                            None => {
+                                ui.label(
+                                    RichText::new("BPM: (niet beschikbaar)")
                                         .size(13.0)
                                         .color(Color32::GRAY),
                                 );

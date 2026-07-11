@@ -1,4 +1,5 @@
 use rustfft::{num_complex::Complex, FftPlanner};
+use soundtouch::BPMDetect;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -387,5 +388,45 @@ pub fn detect_key_via_cli(
         ))
     } else {
         Ok(key)
+    }
+}
+
+/// Detecteer BPM (tempo) in audiogesamples.
+/// Gebruikt de SoundTouch BPMDetect (autocorrelatie-based).
+/// Als `start_sec` en `end_sec` zijn ingesteld, wordt alleen dat stuk geanalyseerd.
+pub fn detect_bpm(
+    samples: &[f32],
+    sample_rate: u32,
+    start_sec: Option<f32>,
+    end_sec: Option<f32>,
+) -> Option<f32> {
+    if samples.is_empty() || sample_rate == 0 {
+        return None;
+    }
+
+    // Bepaal welk stuk samples we analyseren (A-B selectie of hele file)
+    let start_sample = start_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(0)
+        .min(samples.len().saturating_sub(1));
+    let end_sample = end_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(samples.len())
+        .min(samples.len());
+
+    if end_sample <= start_sample {
+        return None;
+    }
+
+    let slice = &samples[start_sample..end_sample];
+
+    let mut detector = BPMDetect::new(1, sample_rate);
+    detector.input_samples(slice);
+    let bpm = detector.get_bpm();
+
+    if bpm > 0.0 && bpm < 500.0 {
+        Some(bpm)
+    } else {
+        None
     }
 }
