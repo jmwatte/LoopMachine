@@ -145,7 +145,7 @@ impl UndoState {
 **Huidig:** `SoundTouchSource` en `SequenceSource` hebben bijna identieke logica voor: pitch/tempo wijzigingen checken, input chunks lezen uit samples, TimeStretch voeden, output drainen, volume toepassen, soft-clip.
 **Fix:** Trek een trait (bv. `AudioSource`) of gedeelde `AudioProcessor` struct uit die beide sources gebruiken. Of: laat `SequenceSource` per stap een `SoundTouchSource`-achtige interne source gebruiken.
 
-#### 14. Consolideer SaveLoop code
+   
 **Bestand:** `app.rs:1625-1663` (shortcut handler) en `app.rs:2284-2318` (UI button)
 **Huidig:** Exact dezelfde logica op twee plekken. Verschil: shortcut gebruikt `library.add_loop()`, UI button ook.
 **Fix:** Vervang beide door één `save_current_loop()` methode op `LoopEditorApp`.

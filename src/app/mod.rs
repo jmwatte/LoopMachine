@@ -1491,8 +1491,18 @@ impl eframe::App for LoopEditorApp {
                         }
                     });
                 if self.waveform_state.channel_mode != old_mode {
+                    // Bewaar loop bounds vóór herladen (load_file wist ze)
+                    let saved_a = self.waveform_state.loop_a_secs;
+                    let saved_b = self.waveform_state.loop_b_secs;
                     if let Some(ref path) = self.waveform_state.path.clone() {
                         self.load_file(path);
+                    }
+                    // Herstel loop bounds zodat A-B markers zichtbaar blijven
+                    self.waveform_state.loop_a_secs = saved_a;
+                    self.waveform_state.loop_b_secs = saved_b;
+                    // Stuur loop bounds opnieuw naar audio-thread
+                    if saved_a.is_some() || saved_b.is_some() {
+                        self.sync_loop_bounds();
                     }
                     self.save_session();
                 }
