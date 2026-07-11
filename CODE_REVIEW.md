@@ -176,7 +176,7 @@ impl UndoState {
 
 | Feature | Beschrijving |
 |---------|-------------|
-| BPM detectie | Voeg beat-tracking toe naast chroma-analyse |
+| ✅ BPM detectie + beat markers | Beat-tracking toegevoegd; 📌 Beats-knop plaatst markers op elke beat |
 | Tap tempo | Druk op `T` in ritme om BPM in te stellen |
 | Quantize markers | Rond marker posities af op BPM-grid |
 | Crossfade tussen arrangement-stappen | 10ms crossfade in SequenceSource |

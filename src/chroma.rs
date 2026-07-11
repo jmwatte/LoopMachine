@@ -430,3 +430,57 @@ pub fn detect_bpm(
         None
     }
 }
+
+/// Detecteer individuele beat-posities in audiogesamples.
+/// Gebruikt de SoundTouch BPMDetect voor beat-tracking.
+/// Retourneert een Vec van `(position_secs, strength)` voor elke gedetecteerde beat.
+/// De `strength` is een maat voor betrouwbaarheid (0.0–1.0).
+pub fn detect_beats(
+    samples: &[f32],
+    sample_rate: u32,
+    start_sec: Option<f32>,
+    end_sec: Option<f32>,
+) -> Option<Vec<(f32, f32)>> {
+    if samples.is_empty() || sample_rate == 0 {
+        return None;
+    }
+
+    // Bepaal welk stuk samples we analyseren (A-B selectie of hele file)
+    let start_sample = start_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(0)
+        .min(samples.len().saturating_sub(1));
+    let end_sample = end_sec
+        .map(|s| (s * sample_rate as f32) as usize)
+        .unwrap_or(samples.len())
+        .min(samples.len());
+
+    if end_sample <= start_sample {
+        return None;
+    }
+
+    let slice = &samples[start_sample..end_sample];
+
+    let mut detector = BPMDetect::new(1, sample_rate);
+    detector.input_samples(slice);
+
+    // Vraag de beat posities op
+    let max = detector.query_size(10000);
+    if max <= 0 {
+        return None;
+    }
+    let mut positions = vec![0.0f32; max as usize];
+    let mut strengths = vec![0.0f32; max as usize];
+    let count = detector.get_beats(&mut positions, &mut strengths, max);
+
+    if count > 0 {
+        let beats: Vec<(f32, f32)> = positions[..count as usize]
+            .iter()
+            .zip(strengths[..count as usize].iter())
+            .map(|(&pos, &str)| (pos, str))
+            .collect();
+        Some(beats)
+    } else {
+        None
+    }
+}

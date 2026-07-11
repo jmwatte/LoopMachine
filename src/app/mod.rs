@@ -4,7 +4,9 @@ pub mod ui_library;
 pub mod ui_shortcuts;
 use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
-use crate::chroma::{detect_bpm, detect_chroma, detect_key_via_cli, Chroma, ChromaMode};
+use crate::chroma::{
+    detect_beats, detect_bpm, detect_chroma, detect_key_via_cli, Chroma, ChromaMode,
+};
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
@@ -44,6 +46,8 @@ pub struct LoopEditorApp {
     pub keyfinder_cli_result: Option<Result<String, String>>,
     /// BPM detectie resultaat (SoundTouch)
     pub bpm_result: Option<f32>,
+    /// Beat posities (seconden) met betrouwbaarheid (SoundTouch)
+    pub bpm_beat_positions: Option<Vec<(f32, f32)>>,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -161,6 +165,7 @@ impl LoopEditorApp {
             bass_chroma: None,
             keyfinder_cli_result: None,
             bpm_result: None,
+            bpm_beat_positions: None,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -291,6 +296,7 @@ impl LoopEditorApp {
                 self.bass_chroma = None;
                 self.keyfinder_cli_result = None;
                 self.bpm_result = None;
+                self.bpm_beat_positions = None;
                 self.save_session();
 
                 let mut msg = format!(
@@ -323,6 +329,47 @@ impl LoopEditorApp {
             track.markers = self.waveform_state.markers.clone();
             crate::loops::save_library(&self.library);
         }
+    }
+
+    /// Zet BPM-beat posities om naar echte markers in de waveform.
+    /// Alleen beats boven de 0.3 strength worden geplaatst (filtert ruis).
+    fn place_bpm_markers(&mut self) {
+        use crate::waveform::MarkerKind;
+
+        let Some(ref beats) = self.bpm_beat_positions else {
+            self.status_message = "Geen BPM beat data beschikbaar".to_string();
+            self.status_message_timer = 3 * 60;
+            return;
+        };
+
+        // Verwijder oude BPM-gebaseerde beat markers (die uit een eerdere plaatsing)
+        self.waveform_state
+            .markers
+            .retain(|m| m.kind != MarkerKind::Beat);
+
+        // Plaats markers op elke beat (boven minimale strength)
+        let min_strength = 0.3_f32;
+        let mut count = 0;
+        for &(pos_secs, strength) in beats {
+            if strength < min_strength {
+                continue;
+            }
+            count += 1;
+            self.waveform_state.markers.push(crate::waveform::Marker {
+                name: format!("B{}", count),
+                position_secs: pos_secs,
+                kind: MarkerKind::Beat,
+            });
+        }
+
+        self.push_undo();
+        self.sync_markers_to_library();
+        self.status_message = format!(
+            "{} BPM markers geplaatst (strength > {:.0}%)",
+            count,
+            min_strength * 100.0
+        );
+        self.status_message_timer = 5 * 60;
     }
 
     /// Stuur huidige A-B loop naar de audio-thread.
@@ -461,8 +508,12 @@ impl LoopEditorApp {
         self.status_message_timer = 2 * 60;
     }
 
-    /// Centreer de viewport op de huidige A-B loop.
+    /// Centreer de viewport op de A-B loop, of op de playhead als er geen loop is.
     fn center_view_on_loop(&mut self, viewport_width_px: f32) {
+        if viewport_width_px <= 0.0 || self.waveform_state.duration_secs <= 0.0 {
+            return;
+        }
+
         if let (Some(a), Some(b)) = (
             self.waveform_state.loop_a_secs,
             self.waveform_state.loop_b_secs,
@@ -477,8 +528,20 @@ impl LoopEditorApp {
                 let max_scroll = (self.waveform_state.duration_secs - visible_secs).max(0.0);
                 self.waveform_state.scroll_offset =
                     (mid - visible_secs / 2.0).clamp(0.0, max_scroll);
+                return;
             }
         }
+
+        // Geen geldige A-B loop → centreer op de playhead
+        let target_zoom = (viewport_width_px * 0.6) / 10.0; // ~10 sec zichtbaar
+        self.waveform_state.zoom = target_zoom.clamp(5.0, 5000.0);
+
+        let visible_secs = viewport_width_px / self.waveform_state.zoom;
+        let pos = self
+            .waveform_play_position
+            .clamp(0.0, self.waveform_state.duration_secs);
+        let max_scroll = (self.waveform_state.duration_secs - visible_secs).max(0.0);
+        self.waveform_state.scroll_offset = (pos - visible_secs / 2.0).clamp(0.0, max_scroll);
     }
 
     // ───────────────────────────────────────────────
@@ -1204,7 +1267,7 @@ impl eframe::App for LoopEditorApp {
                     .is_pressed(ShortcutAction::CenterLoop, &ctx.input(|i| i.clone()))
                 {
                     self.center_view_on_loop(self.last_panel_width);
-                    self.status_message = "Loop gecentreerd in viewport".to_string();
+                    self.status_message = "Weergave gecentreerd".to_string();
                     self.status_message_timer = 2 * 60;
                 }
             }
@@ -1897,17 +1960,10 @@ impl eframe::App for LoopEditorApp {
                 // Center loop in viewport
                 if ui
                     .button("🎯 Center Loop")
-                    .on_hover_text("Centreer de A-B loop in het venster")
+                    .on_hover_text("Centreer A-B loop of playhead in het venster")
                     .clicked()
                 {
-                    if let (Some(a), Some(b)) = (
-                        self.waveform_state.loop_a_secs,
-                        self.waveform_state.loop_b_secs,
-                    ) {
-                        if b > a {
-                            self.center_view_on_loop(panel_width);
-                        }
-                    }
+                    self.center_view_on_loop(panel_width);
                 }
 
                 ui.separator();
@@ -2138,6 +2194,7 @@ impl eframe::App for LoopEditorApp {
                             // BPM detectie (SoundTouch)
                             if !samples.is_empty() && sr > 0 {
                                 self.bpm_result = detect_bpm(samples, sr, a, b);
+                                self.bpm_beat_positions = detect_beats(samples, sr, a, b);
                                 if let Some(bpm) = self.bpm_result {
                                     self.status_message =
                                         format!("{}  |  BPM: {:.1}", self.status_message, bpm);
@@ -2255,6 +2312,12 @@ impl eframe::App for LoopEditorApp {
                                         .strong()
                                         .color(Color32::from_rgb(120, 200, 220)),
                                 );
+                                // Knop om BPM markers te plaatsen
+                                if self.bpm_beat_positions.is_some()
+                                    && ui.small_button("📌 Beats").clicked()
+                                {
+                                    self.place_bpm_markers();
+                                }
                             }
                             None => {
                                 ui.label(
