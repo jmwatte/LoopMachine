@@ -840,7 +840,11 @@ impl LoopEditorApp {
             ToolbarAction::ZoomIn | ToolbarAction::ZoomOut | ToolbarAction::ResetZoom => {
                 self.waveform_state.path.is_some()
             }
-            ToolbarAction::PlaceBeats => self.waveform_state.path.is_some(),
+            ToolbarAction::PlaceBeats
+            | ToolbarAction::TempoDown
+            | ToolbarAction::TempoUp
+            | ToolbarAction::PitchDown
+            | ToolbarAction::PitchUp => self.waveform_state.path.is_some(),
             ToolbarAction::Detect => {
                 self.waveform_state.path.is_some() && self.waveform_state.loop_a_secs.is_some()
             }
@@ -952,6 +956,58 @@ impl LoopEditorApp {
                 self.push_undo();
                 self.waveform_state.zoom = 100.0;
                 self.waveform_state.scroll_offset = 0.0;
+            }
+            ToolbarAction::TempoDown => {
+                self.push_undo();
+                self.waveform_state.tempo = (self.waveform_state.tempo / 1.1).max(0.1);
+                if self.waveform_is_playing {
+                    let _ = self
+                        .waveform_cmd_tx
+                        .send(WaveformCommand::SetTempo(self.waveform_state.tempo));
+                }
+                self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
+                self.status_message_timer = 2 * 60;
+            }
+            ToolbarAction::TempoUp => {
+                self.push_undo();
+                self.waveform_state.tempo = (self.waveform_state.tempo * 1.1).min(3.0);
+                if self.waveform_is_playing {
+                    let _ = self
+                        .waveform_cmd_tx
+                        .send(WaveformCommand::SetTempo(self.waveform_state.tempo));
+                }
+                self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
+                self.status_message_timer = 2 * 60;
+            }
+            ToolbarAction::PitchDown => {
+                self.push_undo();
+                self.waveform_state.pitch_semitones =
+                    (self.waveform_state.pitch_semitones - 1.0).max(-12.0);
+                if self.waveform_is_playing {
+                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(
+                        self.waveform_state.pitch_semitones,
+                    ));
+                }
+                self.status_message = format!(
+                    "Pitch: {:+.0} semitones",
+                    self.waveform_state.pitch_semitones
+                );
+                self.status_message_timer = 2 * 60;
+            }
+            ToolbarAction::PitchUp => {
+                self.push_undo();
+                self.waveform_state.pitch_semitones =
+                    (self.waveform_state.pitch_semitones + 1.0).min(12.0);
+                if self.waveform_is_playing {
+                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(
+                        self.waveform_state.pitch_semitones,
+                    ));
+                }
+                self.status_message = format!(
+                    "Pitch: {:+.0} semitones",
+                    self.waveform_state.pitch_semitones
+                );
+                self.status_message_timer = 2 * 60;
             }
             ToolbarAction::PlaceBeats => {
                 let pos = self.waveform_play_position;

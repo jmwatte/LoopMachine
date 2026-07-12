@@ -37,6 +37,14 @@ pub enum ToolbarAction {
     Setup,
     /// 🔇 Audit toggle
     ToggleAudit,
+    /// Tempo −10%
+    TempoDown,
+    /// Tempo +10%
+    TempoUp,
+    /// Pitch −1 semitone
+    PitchDown,
+    /// Pitch +1 semitone
+    PitchUp,
 }
 
 impl ToolbarAction {
@@ -58,6 +66,10 @@ impl ToolbarAction {
             Self::Export => "Export",
             Self::Setup => "Setup",
             Self::ToggleAudit => "Audit",
+            Self::TempoDown => "Tempo −10%",
+            Self::TempoUp => "Tempo +10%",
+            Self::PitchDown => "Pitch −1",
+            Self::PitchUp => "Pitch +1",
         }
     }
 
@@ -79,6 +91,10 @@ impl ToolbarAction {
             Self::Export => "\u{1F4E4}",
             Self::Setup => "\u{2699}",
             Self::ToggleAudit => "\u{1F507}",
+            Self::TempoDown => "\u{1F504}\u{2193}",
+            Self::TempoUp => "\u{1F504}\u{2191}",
+            Self::PitchDown => "\u{2B07}",
+            Self::PitchUp => "\u{2B06}",
         }
     }
 
@@ -100,6 +116,10 @@ impl ToolbarAction {
             Self::Export => "Exporteer loops naar WAV (Ctrl+E)",
             Self::Setup => "Open setup-venster voor latency, kalibratie en beat audit",
             Self::ToggleAudit => "Schakel beat-audit kliktrack aan/uit",
+            Self::TempoDown => "Verlaag afspeelsnelheid met 10%",
+            Self::TempoUp => "Verhoog afspeelsnelheid met 10%",
+            Self::PitchDown => "Verlaag toonhoogte met 1 semitone",
+            Self::PitchUp => "Verhoog toonhoogte met 1 semitone",
         }
     }
 
@@ -138,6 +158,10 @@ impl ToolbarAction {
             Self::Export,
             Self::Setup,
             Self::ToggleAudit,
+            Self::TempoDown,
+            Self::TempoUp,
+            Self::PitchDown,
+            Self::PitchUp,
         ]
     }
 
