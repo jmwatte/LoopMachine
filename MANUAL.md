@@ -82,19 +82,19 @@ Kies hoe stereobestanden naar mono worden gemixed:
 ### Loop bewerken
 | Actie | Toets | Omschrijving |
 |-------|-------|-------------|
-| Wissen | `Ctrl+Backspace` of rechterklik | Huidige A-B verwijderen |
-| Nudgen links | `Shift+←` | Schuif loop naar links (behoud lengte) |
-| Nudgen rechts | `Shift+→` | Schuif loop naar rechts (behoud lengte) |
-| Marker A links | `J` | Verschuif A 0.05s naar links |
-| Marker A rechts | `Shift+J` | Verschuif A 0.05s naar rechts |
-| Marker B links | `L` | Verschuif B 0.05s naar links |
-| Marker B rechts | `Shift+L` | Verschuif B 0.05s naar rechts |
-| **Verdubbelen** | `Ctrl+D` | Verdubbel de loop-lengte (vanaf punt A) |
-| **Halveren** | `Ctrl+Shift+D` | Halveer de loop-lengte (vanaf punt A) |
+| Wissen | `Ctrl+Backspace` of rechterklik | Huidige Begin-Eind verwijderen |
+| Nudge loop links | `Shift+←` | Schuif loop naar links (behoud lengte) |
+| Nudge loop rechts | `Shift+→` | Schuif loop naar rechts (behoud lengte) |
+| Nudge Begin links | `J` | Verschuif Begin 0.05s naar links |
+| Nudge Begin rechts | `Shift+J` | Verschuif Begin 0.05s naar rechts |
+| Nudge Eind links | `L` | Verschuif Eind 0.05s naar links |
+| Nudge Eind rechts | `Shift+L` | Verschuif Eind 0.05s naar rechts |
+| **Verdubbelen** | `Ctrl+D` | Verdubbel de loop-lengte (vanaf Begin) |
+| **Halveren** | `Ctrl+Shift+D` | Halveer de loop-lengte (vanaf Begin) |
 | **Snap links** | `Q` | Verplaats loop naar dichtstbijzijnde marker links |
 | **Snap rechts** | `W` | Verplaats loop naar dichtstbijzijnde marker rechts |
 | Bypass | `Ctrl+B` | Schakel looping uit (speelt door naar einde) |
-| Center in viewport | `C` | Centreer de A-B loop in het venster |
+| Center in viewport | `C` | Centreer de loop in het venster |
 
 ### Herhaal telling
 Stel een aantal herhalingen in met de "Herhaal:" teller. `0` = oneindig herhalen.
