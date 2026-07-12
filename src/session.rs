@@ -20,6 +20,9 @@ pub struct SessionState {
     /// Laatst gebruikte directory voor file dialog.
     #[serde(default)]
     pub last_directory: Option<String>,
+    /// Drempelwaarde voor BPM beat-detectie (0.0-1.0).
+    #[serde(default)]
+    pub bpm_threshold: f32,
 }
 
 impl SessionState {
@@ -36,6 +39,7 @@ impl SessionState {
         channel_mode: &str,
         arr_parse_buf: &str,
         last_directory: Option<&str>,
+        bpm_threshold: f32,
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),
@@ -50,6 +54,7 @@ impl SessionState {
             channel_mode: channel_mode.to_string(),
             arr_parse_buf: arr_parse_buf.to_string(),
             last_directory: last_directory.map(|s| s.to_string()),
+            bpm_threshold,
         };
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             let _ = std::fs::write(SESSION_FILE, json);

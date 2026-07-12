@@ -48,6 +48,8 @@ pub struct LoopEditorApp {
     pub bpm_result: Option<f32>,
     /// Beat posities (seconden) met betrouwbaarheid (SoundTouch)
     pub bpm_beat_positions: Option<Vec<(f32, f32)>>,
+    /// Drempelwaarde voor beat-detectie (0.0-1.0), hoe hoger hoe strenger
+    pub bpm_threshold: f32,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -166,6 +168,7 @@ impl LoopEditorApp {
             keyfinder_cli_result: None,
             bpm_result: None,
             bpm_beat_positions: None,
+            bpm_threshold: 0.3,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -239,6 +242,7 @@ impl LoopEditorApp {
                 }
             }
             app.arr_parse_buf = session.arr_parse_buf;
+            app.bpm_threshold = session.bpm_threshold;
             // Herstel laatste directory voor file dialog
             if let Some(ref dir) = session.last_directory {
                 if Path::new(dir).exists() {
@@ -376,8 +380,37 @@ impl LoopEditorApp {
         format!("Marker-BPM: {:.1} ({} beats)", bpm, beats.len())
     }
 
+    /// Verwijder markers op basis van type.
+    /// - `None`: verwijder alle markers
+    /// - `Some(kind)`: verwijder alleen markers van dat type
+    fn clear_markers_by_kind(&mut self, kind: Option<crate::waveform::MarkerKind>) {
+        use crate::waveform::MarkerKind;
+        let before = self.waveform_state.markers.len();
+        self.waveform_state.markers.retain(|m| {
+            if let Some(k) = kind {
+                m.kind != k
+            } else {
+                false
+            }
+        });
+        let removed = before - self.waveform_state.markers.len();
+        if removed > 0 {
+            self.push_undo();
+            self.sync_markers_to_library();
+            let label = match kind {
+                None => "alle markers".to_string(),
+                Some(MarkerKind::Section) => "sectie-markers".to_string(),
+                Some(MarkerKind::Measure) => "maat-markers".to_string(),
+                Some(MarkerKind::Beat) => "beat-markers".to_string(),
+            };
+            self.status_message = format!("{} {} verwijderd", removed, label);
+            self.status_message_timer = 3 * 60;
+        }
+    }
+
     /// Zet BPM-beat posities om naar echte markers in de waveform.
-    /// Alleen beats boven de 0.3 strength worden geplaatst (filtert ruis).
+    /// Zet BPM-beat posities om naar echte markers in de waveform.
+    /// Gebruikt `self.bpm_threshold` om ruis weg te filteren.
     fn place_bpm_markers(&mut self) {
         use crate::waveform::MarkerKind;
 
@@ -393,7 +426,7 @@ impl LoopEditorApp {
             .retain(|m| m.kind != MarkerKind::Beat);
 
         // Plaats markers op elke beat (boven minimale strength)
-        let min_strength = 0.3_f32;
+        let min_strength = self.bpm_threshold;
         let mut count = 0;
         for &(pos_secs, strength) in beats {
             if strength < min_strength {
@@ -663,6 +696,7 @@ impl LoopEditorApp {
             &mode_str,
             &self.arr_parse_buf,
             self.file_dialog_last_dir.as_deref(),
+            self.bpm_threshold,
         );
     }
 
@@ -1018,22 +1052,44 @@ impl eframe::App for LoopEditorApp {
                     ShortcutAction::DeleteNearestMarker,
                     &ctx.input(|i| i.clone()),
                 ) {
-                    let pos = self.waveform_play_position;
-                    let mut best_idx: Option<usize> = None;
-                    let mut best_dist = 2.0_f32;
-                    for (i, m) in self.waveform_state.markers.iter().enumerate() {
-                        let dist = (m.position_secs - pos).abs();
-                        if dist < best_dist {
-                            best_dist = dist;
-                            best_idx = Some(i);
+                    // Check eerst of er markers geselecteerd zijn (via Shift+drag)
+                    if let Some((sel_a, sel_b)) = self.waveform_state.selected_marker_range {
+                        let (lo, hi) = if sel_a < sel_b {
+                            (sel_a, sel_b)
+                        } else {
+                            (sel_b, sel_a)
+                        };
+                        let before = self.waveform_state.markers.len();
+                        self.waveform_state
+                            .markers
+                            .retain(|m| m.position_secs < lo || m.position_secs > hi);
+                        let removed = before - self.waveform_state.markers.len();
+                        if removed > 0 {
+                            self.waveform_state.selected_marker_range = None;
+                            self.push_undo();
+                            self.sync_markers_to_library();
+                            self.status_message = format!("{} markers verwijderd", removed);
+                            self.status_message_timer = 3 * 60;
                         }
-                    }
-                    if let Some(idx) = best_idx {
-                        let removed = self.waveform_state.markers.remove(idx);
-                        self.push_undo();
-                        self.sync_markers_to_library();
-                        self.status_message = format!("Marker '{}' verwijderd", removed.name);
-                        self.status_message_timer = 3 * 60;
+                    } else {
+                        // Geen selectie: verwijder dichtstbijzijnde marker bij playhead
+                        let pos = self.waveform_play_position;
+                        let mut best_idx: Option<usize> = None;
+                        let mut best_dist = 2.0_f32;
+                        for (i, m) in self.waveform_state.markers.iter().enumerate() {
+                            let dist = (m.position_secs - pos).abs();
+                            if dist < best_dist {
+                                best_dist = dist;
+                                best_idx = Some(i);
+                            }
+                        }
+                        if let Some(idx) = best_idx {
+                            let removed = self.waveform_state.markers.remove(idx);
+                            self.push_undo();
+                            self.sync_markers_to_library();
+                            self.status_message = format!("Marker '{}' verwijderd", removed.name);
+                            self.status_message_timer = 3 * 60;
+                        }
                     }
                 }
 
@@ -1869,6 +1925,30 @@ impl eframe::App for LoopEditorApp {
                     }
                 }
 
+                // Wis markers (dropdown menu)
+                let has_markers = !self.waveform_state.markers.is_empty();
+                if has_markers {
+                    ui.menu_button("✕ Wis markers", |ui| {
+                        if ui.button("Alle markers").clicked() {
+                            self.clear_markers_by_kind(None);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("Beat-markers (B)").clicked() {
+                            self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Beat));
+                            ui.close_menu();
+                        }
+                        if ui.button("Maat-markers (M)").clicked() {
+                            self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Measure));
+                            ui.close_menu();
+                        }
+                        if ui.button("Sectie-markers (S)").clicked() {
+                            self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Section));
+                            ui.close_menu();
+                        }
+                    });
+                }
+
                 // Undo / Redo
                 if !self.undo_stack.is_empty()
                     && ui
@@ -2510,11 +2590,17 @@ impl eframe::App for LoopEditorApp {
                                         .strong()
                                         .color(Color32::from_rgb(120, 200, 220)),
                                 );
-                                // Knop om BPM markers te plaatsen
-                                if self.bpm_beat_positions.is_some()
-                                    && ui.small_button("📌 Beats").clicked()
-                                {
-                                    self.place_bpm_markers();
+                                // Drempel slider + knop om BPM markers te plaatsen
+                                if self.bpm_beat_positions.is_some() {
+                                    ui.label("↓");
+                                    ui.add(
+                                        egui::Slider::new(&mut self.bpm_threshold, 0.0..=1.0)
+                                            .text("drempel")
+                                            .step_by(0.05),
+                                    );
+                                    if ui.small_button("📌 Beats").clicked() {
+                                        self.place_bpm_markers();
+                                    }
                                 }
                             }
                             None => {

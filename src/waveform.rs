@@ -205,6 +205,8 @@ pub struct WaveformState {
     pub editing_marker: Option<usize>,
     /// Tijdelijke opslag voor marker-naam tijdens bewerken
     pub editing_marker_name: String,
+    /// Selectiebereik voor markers (Shift+drag in markerzone)
+    pub selected_marker_range: Option<(f32, f32)>,
     pub select_drag_start: Option<f32>,
     // ✅ NIEUW: Houdt bij of we wachten op de audio-thread na een seek
     pub seek_pending: Option<f32>,
@@ -221,7 +223,7 @@ impl Default for WaveformState {
             samples: Arc::new(Vec::new()),
             sample_rate: 44100,
             duration_secs: 0.0,
-            zoom: 50.0, // 50 pixels per seconde (default)
+            zoom: 50.0,
             scroll_offset: 0.0,
             loop_a_secs: None,
             loop_b_secs: None,
@@ -235,6 +237,7 @@ impl Default for WaveformState {
             markers: Vec::new(),
             editing_marker: None,
             editing_marker_name: String::new(),
+            selected_marker_range: None,
             select_drag_start: None,
             seek_pending: None,
             channel_mode: ChannelMode::Mono,
@@ -407,7 +410,7 @@ pub fn render_waveform(
     let marker_zone_height = 30.0;
     let (marker_zone_rect, mz_response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width().max(100.0), marker_zone_height),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
     let marker_painter = ui.painter();
 
@@ -479,18 +482,49 @@ pub fn render_waveform(
         if !already_drawn {
             drawn_positions.push(pos_key);
 
+            // Check of deze marker binnen de selectie valt
+            let is_selected = state.selected_marker_range.map_or(false, |(a, b)| {
+                let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                marker.position_secs >= lo && marker.position_secs <= hi
+            });
+
+            // Selectie-highlight (blauwe omlijning)
+            if is_selected {
+                let highlight_rect = egui::Rect::from_min_max(
+                    egui::pos2(px_clamped - 12.0, marker_zone_rect.top() + 1.0),
+                    egui::pos2(px_clamped + 12.0, marker_zone_rect.bottom() - 1.0),
+                );
+                marker_painter.rect_stroke(
+                    highlight_rect,
+                    3.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 160, 255)),
+                );
+            }
+
             // Driehoekje — kleur van deze marker
             let tri_size = 6.0;
             let cx = px_clamped;
             let bot = marker_zone_rect.bottom();
+            let fill_color = if is_selected {
+                egui::Color32::from_rgb(160, 200, 255) // lichter als geselecteerd
+            } else {
+                marker.kind.color()
+            };
             marker_painter.add(egui::Shape::convex_polygon(
                 vec![
                     egui::pos2(cx, bot),
                     egui::pos2(cx - tri_size, bot - tri_size - 4.0),
                     egui::pos2(cx + tri_size, bot - tri_size - 4.0),
                 ],
-                marker.kind.color(),
-                egui::Stroke::new(1.0, marker.kind.stroke_color()),
+                fill_color,
+                egui::Stroke::new(
+                    1.0,
+                    if is_selected {
+                        egui::Color32::from_rgb(100, 160, 255)
+                    } else {
+                        marker.kind.stroke_color()
+                    },
+                ),
             ));
 
             // Naam
@@ -602,6 +636,57 @@ pub fn render_waveform(
     // Verwijder marker bij rechterklik
     if let Some(idx) = marker_to_delete {
         state.markers.remove(idx);
+    }
+
+    // ── Shift+drag in marker zone: selecteer markers in tijdbereik ──
+    let shift_held = ui.ctx().input(|i| i.modifiers.shift);
+    if shift_held && mz_response.drag_started() {
+        if let Some(pos) = mz_response.interact_pointer_pos() {
+            let sec = ((pos.x - marker_zone_rect.left()) / state.zoom + marker_start_sec)
+                .clamp(0.0, state.duration_secs);
+            state.selected_marker_range = Some((sec, sec));
+        }
+    }
+    if shift_held && mz_response.dragged() && state.selected_marker_range.is_some() {
+        if let Some(pos) = mz_response.interact_pointer_pos() {
+            let sec = ((pos.x - marker_zone_rect.left()) / state.zoom + marker_start_sec)
+                .clamp(0.0, state.duration_secs);
+            if let Some((start, _)) = state.selected_marker_range {
+                state.selected_marker_range = Some((start, sec));
+            }
+        }
+    }
+    if !shift_held && mz_response.drag_stopped() {
+        // Bewaar selectie (blijft staan tot Shift+klik ergens anders)
+    }
+    // Bij gewone klik zonder Shift: selectie wissen
+    if mz_response.clicked() && !shift_held {
+        state.selected_marker_range = None;
+    }
+
+    // ── Teken selectie-achtergrond in marker zone ──
+    if let Some((sel_a, sel_b)) = state.selected_marker_range {
+        let (sel_start, sel_end) = if sel_a < sel_b {
+            (sel_a, sel_b)
+        } else {
+            (sel_b, sel_a)
+        };
+        let sel_x1 = marker_zone_rect.left() + (sel_start - marker_start_sec) * state.zoom;
+        let sel_x2 = marker_zone_rect.left() + (sel_end - marker_start_sec) * state.zoom;
+        let sel_rect = egui::Rect::from_min_max(
+            egui::pos2(sel_x1.max(marker_zone_rect.left()), marker_zone_rect.top()),
+            egui::pos2(
+                sel_x2.min(marker_zone_rect.right()),
+                marker_zone_rect.bottom(),
+            ),
+        );
+        if sel_rect.width() > 2.0 {
+            marker_painter.rect_filled(
+                sel_rect,
+                0.0,
+                egui::Color32::from_rgba_premultiplied(80, 120, 200, 60),
+            );
+        }
     }
 
     // ── Marker naam bewerken (in-place text edit) ──
