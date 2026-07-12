@@ -1,5 +1,159 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+
+/// Acties die als knop in de gebruikers-definieerbare werkbalk kunnen verschijnen.
+/// Dit is een subset/bewerkte set van `ShortcutAction` aangevuld met acties
+/// die geen sneltoets hebben (bv. Setup, Audit).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolbarAction {
+    /// 🔍 Detecteer - analyseer A-B selectie
+    Detect,
+    /// ↗ Verleng beats over de hele audio
+    ExtendBeats,
+    /// ✕ Wis A-B loop
+    ClearLoop,
+    /// ↩ Undo
+    Undo,
+    /// ↪ Redo
+    Redo,
+    /// 💾 Save huidige loop naar library
+    SaveLoop,
+    /// 🎯 Center view op A-B loop
+    CenterLoop,
+    /// 🔍− Zoom uit
+    ZoomOut,
+    /// 🔍+ Zoom in
+    ZoomIn,
+    /// ⟲ Reset zoom/scroll
+    ResetZoom,
+    /// 📌 Plaats beat markers
+    PlaceBeats,
+    /// ARR schakelaar
+    ToggleArranger,
+    /// 📤 Export
+    Export,
+    /// ⚙ Setup-venster
+    Setup,
+    /// 🔇 Audit toggle
+    ToggleAudit,
+}
+
+impl ToolbarAction {
+    /// Toonbare naam (kort, voor in de knop)
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Detect => "Detecteer",
+            Self::ExtendBeats => "Verleng beats",
+            Self::ClearLoop => "Wis loop",
+            Self::Undo => "Undo",
+            Self::Redo => "Redo",
+            Self::SaveLoop => "Save Loop",
+            Self::CenterLoop => "Center Loop",
+            Self::ZoomOut => "Zoom −",
+            Self::ZoomIn => "Zoom +",
+            Self::ResetZoom => "Reset",
+            Self::PlaceBeats => "Beats",
+            Self::ToggleArranger => "ARR",
+            Self::Export => "Export",
+            Self::Setup => "Setup",
+            Self::ToggleAudit => "Audit",
+        }
+    }
+
+    /// Emoji/icoon voor de knop
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::Detect => "\u{1F50D}",
+            Self::ExtendBeats => "\u{2197}",
+            Self::ClearLoop => "\u{2715}",
+            Self::Undo => "\u{21A9}",
+            Self::Redo => "\u{21AA}",
+            Self::SaveLoop => "\u{1F4BE}",
+            Self::CenterLoop => "\u{1F3AF}",
+            Self::ZoomOut => "\u{1F50D}\u{2212}",
+            Self::ZoomIn => "\u{1F50D}\u{002B}",
+            Self::ResetZoom => "\u{27F2}",
+            Self::PlaceBeats => "\u{1F4CC}",
+            Self::ToggleArranger => "ARR",
+            Self::Export => "\u{1F4E4}",
+            Self::Setup => "\u{2699}",
+            Self::ToggleAudit => "\u{1F507}",
+        }
+    }
+
+    /// Lange hover-tekst (met sneltoets info)
+    pub fn hover_text(&self) -> &'static str {
+        match self {
+            Self::Detect => "Analyseer A-B selectie op toonhoogtes en BPM",
+            Self::ExtendBeats => "Verspreid beat markers over de hele audio",
+            Self::ClearLoop => "Verwijder A-B selectie (Ctrl+Backspace)",
+            Self::Undo => "Ongedaan maken (Ctrl+Z)",
+            Self::Redo => "Opnieuw doen (Ctrl+Y)",
+            Self::SaveLoop => "Bewaar huidige A-B loop in de bibliotheek (Ctrl+S)",
+            Self::CenterLoop => "Centreer weergave op de A-B loop (C)",
+            Self::ZoomOut => "Uitzoomen (Ctrl+\u{2212})",
+            Self::ZoomIn => "Inzoomen (Ctrl+=)",
+            Self::ResetZoom => "Reset zoom en scroll (Ctrl+0)",
+            Self::PlaceBeats => "Plaats een beat marker bij de playhead (B)",
+            Self::ToggleArranger => "Open/sluit de arranger view",
+            Self::Export => "Exporteer loops naar WAV (Ctrl+E)",
+            Self::Setup => "Open setup-venster voor latency, kalibratie en beat audit",
+            Self::ToggleAudit => "Schakel beat-audit kliktrack aan/uit",
+        }
+    }
+
+    /// Koppel aan `ShortcutAction` (indien van toepassing)
+    pub fn shortcut_action(&self) -> Option<ShortcutAction> {
+        match self {
+            Self::ClearLoop => Some(ShortcutAction::ClearLoop),
+            Self::Undo => Some(ShortcutAction::Undo),
+            Self::Redo => Some(ShortcutAction::Redo),
+            Self::SaveLoop => Some(ShortcutAction::SaveLoop),
+            Self::CenterLoop => Some(ShortcutAction::CenterLoop),
+            Self::ZoomOut => Some(ShortcutAction::ZoomOut),
+            Self::ZoomIn => Some(ShortcutAction::ZoomIn),
+            Self::ResetZoom => Some(ShortcutAction::ResetZoom),
+            Self::PlaceBeats => Some(ShortcutAction::AddBeatMarker),
+            Self::Export => Some(ShortcutAction::ExportLoops),
+            _ => None, // Detect, ExtendBeats, Setup, ToggleAudit, ToggleArranger hebben geen directe ShortcutAction
+        }
+    }
+
+    /// Alle beschikbare toolbar-acties (voor het customize-venster)
+    pub fn all() -> &'static [ToolbarAction] {
+        &[
+            Self::Detect,
+            Self::ExtendBeats,
+            Self::ClearLoop,
+            Self::Undo,
+            Self::Redo,
+            Self::SaveLoop,
+            Self::CenterLoop,
+            Self::ZoomOut,
+            Self::ZoomIn,
+            Self::ResetZoom,
+            Self::PlaceBeats,
+            Self::ToggleArranger,
+            Self::Export,
+            Self::Setup,
+            Self::ToggleAudit,
+        ]
+    }
+
+    /// Standaard toolbar (de oorspronkelijk hardcoded set)
+    pub fn default_toolbar() -> Vec<ToolbarAction> {
+        vec![
+            Self::Detect,
+            Self::ExtendBeats,
+            Self::ClearLoop,
+            Self::Undo,
+            Self::Redo,
+            Self::Setup,
+            Self::ToggleAudit,
+        ]
+    }
+}
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;

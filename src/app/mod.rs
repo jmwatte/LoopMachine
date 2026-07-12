@@ -10,12 +10,13 @@ use crate::chroma::{
 };
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
-use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig};
+use crate::shortcuts::{KeyBinding, ShortcutAction, ShortcutsConfig, ToolbarAction};
 use crate::waveform::{render_waveform, ChannelMode, WaveformState};
 use crate::waveform_player::{start_waveform_thread, WaveformCommand, WaveformEvent};
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::FileDialog;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{Arc, Mutex};
@@ -122,6 +123,12 @@ pub struct LoopEditorApp {
     pub calibration_active: bool,
     /// Bulk-shift waarde voor markers (ms), persistent in de UI
     pub bulk_shift_ms: i32,
+
+    // ── User-definable toolbar ──
+    /// Lijst van acties die als knoppen in de actie-werkbalk verschijnen.
+    pub toolbar_buttons: Vec<ToolbarAction>,
+    /// Toon het toolbar-editor venster
+    pub show_toolbar_editor: bool,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -256,6 +263,8 @@ impl LoopEditorApp {
             calibration_next_idx: 0,
             calibration_active: false,
             bulk_shift_ms: 0,
+            toolbar_buttons: ToolbarAction::default_toolbar(),
+            show_toolbar_editor: false,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -282,6 +291,16 @@ impl LoopEditorApp {
             app.bpm_threshold = session.bpm_threshold;
             app.playback_latency_ms = session.playback_latency_ms;
             app.beat_offset_ms = session.beat_offset_ms;
+            // Herstel toolbar buttons uit sessie
+            if let Some(ref btn_strings) = session.toolbar_buttons {
+                let parsed: Vec<ToolbarAction> = btn_strings
+                    .iter()
+                    .filter_map(|s| serde_json::from_str(&format!("\"{s}\"")).ok())
+                    .collect();
+                if !parsed.is_empty() {
+                    app.toolbar_buttons = parsed;
+                }
+            }
             // Herstel laatste directory voor file dialog
             if let Some(ref dir) = session.last_directory {
                 if Path::new(dir).exists() {
@@ -724,6 +743,12 @@ impl LoopEditorApp {
     /// Sla huidige state op in session.json (voor herstart).
     fn save_session(&self) {
         let mode_str = format!("{:?}", self.waveform_state.channel_mode);
+        let toolbar_strings: Vec<String> = self
+            .toolbar_buttons
+            .iter()
+            .map(|a| serde_json::to_string(a).unwrap_or_default())
+            .filter(|s| !s.is_empty())
+            .collect();
         SessionState::save(
             self.waveform_state.path.as_deref(),
             self.waveform_play_position,
@@ -740,6 +765,7 @@ impl LoopEditorApp {
             self.bpm_threshold,
             self.playback_latency_ms,
             self.beat_offset_ms,
+            &toolbar_strings,
         );
     }
 
@@ -790,6 +816,330 @@ impl LoopEditorApp {
     // ───────────────────────────────────────────────
     // Export logic
     // ───────────────────────────────────────────────
+
+    /// Render een toolbar-knop voor de gegeven actie en voer deze uit bij klik.
+    fn toolbar_button(&mut self, ui: &mut egui::Ui, action: ToolbarAction) {
+        // Bepaal of de actie beschikbaar is in de huidige context
+        let available = match action {
+            ToolbarAction::ExtendBeats => {
+                let beat_count = self
+                    .waveform_state
+                    .markers
+                    .iter()
+                    .filter(|m| m.kind == crate::waveform::MarkerKind::Beat)
+                    .count();
+                beat_count >= 2
+            }
+            ToolbarAction::ClearLoop => self.waveform_state.loop_a_secs.is_some(),
+            ToolbarAction::Undo => !self.undo_stack.is_empty(),
+            ToolbarAction::Redo => !self.redo_stack.is_empty(),
+            ToolbarAction::SaveLoop => {
+                self.waveform_state.loop_a_secs.is_some() && self.waveform_state.path.is_some()
+            }
+            ToolbarAction::CenterLoop => self.waveform_state.path.is_some(),
+            ToolbarAction::ZoomIn | ToolbarAction::ZoomOut | ToolbarAction::ResetZoom => {
+                self.waveform_state.path.is_some()
+            }
+            ToolbarAction::PlaceBeats => self.waveform_state.path.is_some(),
+            ToolbarAction::Detect => {
+                self.waveform_state.path.is_some() && self.waveform_state.loop_a_secs.is_some()
+            }
+            ToolbarAction::Export => {
+                self.waveform_state.path.is_some()
+                    && !self
+                        .library
+                        .track_for_path(self.waveform_state.path.as_ref().unwrap())
+                        .loops
+                        .is_empty()
+            }
+            _ => true, // ToggleArranger, Setup, ToggleAudit altijd beschikbaar
+        };
+
+        let label = if action == ToolbarAction::ToggleAudit {
+            let audit_on = self
+                .click_enabled
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if audit_on {
+                format!("{} Audit: AAN", action.icon())
+            } else {
+                format!("{} Audit", action.icon())
+            }
+        } else if action == ToolbarAction::ToggleArranger {
+            "ARR".to_string()
+        } else if action == ToolbarAction::Detect {
+            format!("{} Detecteer", action.icon())
+        } else if action == ToolbarAction::ExtendBeats {
+            format!("{} Verleng beats", action.icon())
+        } else if action == ToolbarAction::ClearLoop {
+            format!("{} Wis loop", action.icon())
+        } else if action == ToolbarAction::Undo {
+            "\u{21A9} Undo".to_string()
+        } else if action == ToolbarAction::Redo {
+            "\u{21AA} Redo".to_string()
+        } else if action == ToolbarAction::Setup {
+            format!("{} Setup", action.icon())
+        } else {
+            format!("{} {}", action.icon(), action.display_name())
+        };
+
+        // Bouw hover-text met eventuele sneltoets
+        let hover = if let Some(sa) = action.shortcut_action() {
+            if let Some(binding) = self.shortcuts.binding_for(sa) {
+                format!("{}  ({})", action.hover_text(), binding.display())
+            } else {
+                action.hover_text().to_string()
+            }
+        } else {
+            action.hover_text().to_string()
+        };
+
+        let resp = ui
+            .add_enabled(available, egui::Button::new(label))
+            .on_hover_text(hover);
+
+        if resp.clicked() {
+            self.execute_toolbar_action(action);
+        }
+    }
+
+    /// Voer een toolbar-actie uit.
+    fn execute_toolbar_action(&mut self, action: ToolbarAction) {
+        match action {
+            ToolbarAction::Detect => self.run_detection(),
+            ToolbarAction::ExtendBeats => self.extend_beat_markers(),
+            ToolbarAction::ClearLoop => {
+                self.waveform_state.loop_a_secs = None;
+                self.waveform_state.loop_b_secs = None;
+                self.pending_loop_point = None;
+                self.push_undo();
+                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                    a_secs: 0.0,
+                    b_secs: 0.0,
+                });
+                self.status_message = "Loop gewist".to_string();
+                self.status_message_timer = 2 * 60;
+            }
+            ToolbarAction::Undo => {
+                if let Some(state) = self.undo_stack.pop() {
+                    self.redo_stack.push(UndoState::snapshot_from(self));
+                    self.restore_undo(state);
+                }
+            }
+            ToolbarAction::Redo => {
+                if let Some(state) = self.redo_stack.pop() {
+                    self.undo_stack.push(UndoState::snapshot_from(self));
+                    self.restore_undo(state);
+                }
+            }
+            ToolbarAction::SaveLoop => {
+                self.save_current_loop();
+            }
+            ToolbarAction::CenterLoop => {
+                let vp = self.last_panel_width.max(100.0);
+                self.center_view_on_loop(vp);
+                self.status_message = "Weergave gecentreerd op loop".to_string();
+                self.status_message_timer = 2 * 60;
+            }
+            ToolbarAction::ZoomIn => {
+                self.push_undo();
+                self.waveform_state.zoom = (self.waveform_state.zoom * 1.3).min(5000.0);
+            }
+            ToolbarAction::ZoomOut => {
+                self.push_undo();
+                self.waveform_state.zoom = (self.waveform_state.zoom / 1.3).max(5.0);
+            }
+            ToolbarAction::ResetZoom => {
+                self.push_undo();
+                self.waveform_state.zoom = 100.0;
+                self.waveform_state.scroll_offset = 0.0;
+            }
+            ToolbarAction::PlaceBeats => {
+                let pos = self.waveform_play_position;
+                let kind = crate::waveform::MarkerKind::Beat;
+                let existing = self
+                    .waveform_state
+                    .markers
+                    .iter()
+                    .position(|m| m.kind == kind && (m.position_secs - pos).abs() < 0.05);
+                if let Some(idx) = existing {
+                    self.waveform_state.markers.remove(idx);
+                } else {
+                    self.waveform_state.markers.push(crate::waveform::Marker {
+                        name: "B".to_string(),
+                        position_secs: pos,
+                        kind,
+                    });
+                    self.waveform_state
+                        .markers
+                        .sort_by(|a, b| a.position_secs.partial_cmp(&b.position_secs).unwrap());
+                }
+            }
+            ToolbarAction::ToggleArranger => {
+                self.show_arranger ^= true;
+            }
+            ToolbarAction::Export => {
+                self.open_export_window();
+            }
+            ToolbarAction::Setup => {
+                self.show_setup ^= true;
+            }
+            ToolbarAction::ToggleAudit => {
+                self.toggle_beat_audit();
+            }
+        }
+    }
+
+    /// Toon het toolbar-editor venster voor het aanpassen van knoppen.
+    fn show_toolbar_editor_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_toolbar_editor;
+        let mut close = false;
+        {
+            // Neem een clone zodat we de borrow op `self` later vrijgeven
+            let mut scratch = self.toolbar_buttons.clone();
+            let mut changed = false;
+
+            egui::Window::new("Toolbar aanpassen")
+                .id(egui::Id::new("toolbar_editor"))
+                .open(&mut open)
+                .default_size([420.0, 400.0])
+                .resizable(true)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("Gebruik pijltjes om de toolbar-knoppen te ordenen")
+                                .size(12.0)
+                                .color(Color32::GRAY),
+                        );
+                    });
+                    ui.separator();
+
+                    let mut remove_idx: Option<usize> = None;
+
+                    egui::ScrollArea::vertical()
+                        .id_source("toolbar_editor_scroll")
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Actieve knoppen (geordend):")
+                                    .size(13.0)
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+
+                            let mut i = 0;
+                            while i < scratch.len() {
+                                let action = scratch[i];
+                                ui.horizontal(|ui| {
+                                    ui.add_space(8.0);
+                                    if i > 0 {
+                                        if ui
+                                            .button("\u{25B2}")
+                                            .on_hover_text("Naar boven")
+                                            .clicked()
+                                        {
+                                            scratch.swap(i, i - 1);
+                                            changed = true;
+                                        }
+                                    } else {
+                                        ui.add_enabled(false, egui::Button::new("\u{25B2}"));
+                                    }
+                                    if i + 1 < scratch.len() {
+                                        if ui
+                                            .button("\u{25BC}")
+                                            .on_hover_text("Naar beneden")
+                                            .clicked()
+                                        {
+                                            scratch.swap(i, i + 1);
+                                            changed = true;
+                                        }
+                                    } else {
+                                        ui.add_enabled(false, egui::Button::new("\u{25BC}"));
+                                    }
+                                    if ui
+                                        .button("\u{2716}")
+                                        .on_hover_text("Verwijder uit toolbar")
+                                        .clicked()
+                                    {
+                                        remove_idx = Some(i);
+                                    }
+                                    ui.label(format!(
+                                        "{} {}",
+                                        action.icon(),
+                                        action.display_name()
+                                    ));
+                                });
+                                i += 1;
+                            }
+
+                            if let Some(idx) = remove_idx {
+                                scratch.remove(idx);
+                                changed = true;
+                            }
+
+                            ui.add_space(16.0);
+                            ui.separator();
+                            ui.add_space(8.0);
+
+                            ui.label(
+                                RichText::new("Beschikbare acties (klik om toe te voegen):")
+                                    .size(13.0)
+                                    .strong(),
+                            );
+                            ui.add_space(4.0);
+
+                            let in_toolbar: HashSet<ToolbarAction> =
+                                scratch.iter().copied().collect();
+
+                            for action in ToolbarAction::all() {
+                                if in_toolbar.contains(action) {
+                                    continue;
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(format!(
+                                            "{}  {}  — {}",
+                                            action.icon(),
+                                            action.display_name(),
+                                            action.hover_text()
+                                        ))
+                                        .frame(false),
+                                    )
+                                    .clicked()
+                                {
+                                    scratch.push(*action);
+                                    changed = true;
+                                }
+                            }
+                        });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Standaard instellen").clicked() {
+                            scratch = ToolbarAction::default_toolbar();
+                            changed = true;
+                        }
+                        if ui.button("Alles wissen").clicked() {
+                            scratch.clear();
+                            changed = true;
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Sluiten").clicked() {
+                                close = true;
+                            }
+                        });
+                    });
+                });
+
+            if changed {
+                self.toolbar_buttons = scratch;
+                self.save_session();
+            }
+        }
+
+        if !open || close {
+            self.show_toolbar_editor = false;
+        }
+    }
 }
 impl eframe::App for LoopEditorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1949,57 +2299,16 @@ impl eframe::App for LoopEditorApp {
         egui::TopBottomPanel::top("action_toolbar").show(ctx, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                // Detecteer noten
-                if ui
-                    .button("🔍 Detecteer")
-                    .on_hover_text("Analyseer A-B selectie op toonhoogtes en BPM")
-                    .clicked()
-                {
-                    self.run_detection();
+                // Dynamische toolbar: loop over de geconfigureerde knoppen
+                let actions = self.toolbar_buttons.clone();
+                for action in &actions {
+                    self.toolbar_button(ui, *action);
                 }
 
-                // Verleng beats (alleen zichtbaar als er >= 2 beat markers zijn)
-                let beat_count = self
-                    .waveform_state
-                    .markers
-                    .iter()
-                    .filter(|m| m.kind == crate::waveform::MarkerKind::Beat)
-                    .count();
-                if beat_count >= 2 {
-                    if ui
-                        .button("↗ Verleng beats")
-                        .on_hover_text("Verspreid beat markers over de hele audio")
-                        .clicked()
-                    {
-                        self.extend_beat_markers();
-                    }
-                }
-
-                ui.add_space(8.0);
-
-                // Clear loop
-                if self.waveform_state.loop_a_secs.is_some() {
-                    if ui
-                        .button("✕ Wis loop")
-                        .on_hover_text("Verwijder A-B selectie (Ctrl+Backspace)")
-                        .clicked()
-                    {
-                        self.waveform_state.loop_a_secs = None;
-                        self.waveform_state.loop_b_secs = None;
-                        self.pending_loop_point = None;
-                        self.push_undo();
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
-                            a_secs: 0.0,
-                            b_secs: 0.0,
-                        });
-                        self.status_message = "Loop gewist".to_string();
-                        self.status_message_timer = 2 * 60;
-                    }
-                }
-
-                // Wis markers (dropdown menu)
+                // Wis markers (dropdown) — staat altijd rechts van de toolbar
                 let has_markers = !self.waveform_state.markers.is_empty();
                 if has_markers {
+                    ui.add_space(8.0);
                     ui.menu_button("✕ Wis markers", |ui| {
                         if ui.button("Alle markers").clicked() {
                             self.clear_markers_by_kind(None);
@@ -2021,57 +2330,17 @@ impl eframe::App for LoopEditorApp {
                     });
                 }
 
-                // Undo / Redo
-                if !self.undo_stack.is_empty()
-                    && ui
-                        .button("↩ Undo")
-                        .on_hover_text("Ongedaan maken (Ctrl+Z)")
-                        .clicked()
-                {
-                    if let Some(state) = self.undo_stack.pop() {
-                        self.redo_stack.push(UndoState::snapshot_from(self));
-                        self.restore_undo(state);
-                    }
-                }
-                if !self.redo_stack.is_empty()
-                    && ui
-                        .button("↪ Redo")
-                        .on_hover_text("Opnieuw doen (Ctrl+Y)")
-                        .clicked()
-                {
-                    if let Some(state) = self.redo_stack.pop() {
-                        self.undo_stack.push(UndoState::snapshot_from(self));
-                        self.restore_undo(state);
-                    }
-                }
-
-                // ⚙ Setup knop (latency + kalibratie + audit)
-                if ui
-                    .button("\u{2699} Setup")
-                    .on_hover_text("Open setup-venster voor latency, kalibratie en beat audit")
-                    .clicked()
-                {
-                    self.show_setup = !self.show_setup;
-                }
-
-                // Audit toggle knop
-                let audit_on = self
-                    .click_enabled
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let audit_label = if audit_on {
-                    "\u{1F50A} Audit: AAN"
-                } else {
-                    "\u{1F507} Audit"
-                };
-                if ui
-                    .button(audit_label)
-                    .on_hover_text("Schakel beat-audit kliktrack aan/uit")
-                    .clicked()
-                {
-                    self.toggle_beat_audit();
-                }
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Kebab-menu voor toolbar aanpassen
+                    let kebab_resp = ui
+                        .add(
+                            egui::Button::new("\u{22EE}").frame(false), // ⋮ vertical ellipsis
+                        )
+                        .on_hover_text("Toolbar aanpassen...");
+                    if kebab_resp.clicked() {
+                        self.show_toolbar_editor = true;
+                    }
+
                     if !self.status_message.is_empty() {
                         ui.label(
                             RichText::new(&self.status_message)
@@ -2083,6 +2352,11 @@ impl eframe::App for LoopEditorApp {
             });
             ui.add_space(2.0);
         });
+
+        // ── Toolbar editor venster ──
+        if self.show_toolbar_editor {
+            self.show_toolbar_editor_window(ctx);
+        }
 
         self.show_shortcuts_help(ctx);
 
