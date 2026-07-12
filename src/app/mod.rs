@@ -50,6 +50,8 @@ pub struct LoopEditorApp {
     pub bpm_beat_positions: Option<Vec<(f32, f32)>>,
     /// Drempelwaarde voor beat-detectie (0.0-1.0), hoe hoger hoe strenger
     pub bpm_threshold: f32,
+    /// Latency compensatie (ms) voor marker plaatsing tijdens afspelen
+    pub playback_latency_ms: f32,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -169,6 +171,7 @@ impl LoopEditorApp {
             bpm_result: None,
             bpm_beat_positions: None,
             bpm_threshold: 0.3,
+            playback_latency_ms: 40.0,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -243,6 +246,7 @@ impl LoopEditorApp {
             }
             app.arr_parse_buf = session.arr_parse_buf;
             app.bpm_threshold = session.bpm_threshold;
+            app.playback_latency_ms = session.playback_latency_ms;
             // Herstel laatste directory voor file dialog
             if let Some(ref dir) = session.last_directory {
                 if Path::new(dir).exists() {
@@ -697,6 +701,7 @@ impl LoopEditorApp {
             &self.arr_parse_buf,
             self.file_dialog_last_dir.as_deref(),
             self.bpm_threshold,
+            self.playback_latency_ms,
         );
     }
 
@@ -954,7 +959,11 @@ impl eframe::App for LoopEditorApp {
                 // ── Marker shortcuts: S (Section), M (Measure), B (Beat) ──
                 // Alle drie werken met toggle: druk nogmaals op dezelfde plek om te verwijderen.
                 let tolerance = 0.05_f32;
-                let pos = self.waveform_play_position;
+                // Compenseer voor audio-uitvoerlatentie tijdens afspelen
+                let mut pos = self.waveform_play_position;
+                if self.waveform_is_playing && self.playback_latency_ms > 0.0 {
+                    pos = (pos - self.playback_latency_ms / 1000.0).max(0.0);
+                }
 
                 if self
                     .shortcuts
@@ -1971,6 +1980,17 @@ impl eframe::App for LoopEditorApp {
                         self.undo_stack.push(UndoState::snapshot_from(self));
                         self.restore_undo(state);
                     }
+                }
+
+                // Latency compensatie slider (alleen als audio speelt)
+                if self.waveform_is_playing {
+                    ui.add_space(4.0);
+                    ui.label("⏱");
+                    ui.add(
+                        egui::Slider::new(&mut self.playback_latency_ms, 0.0..=150.0)
+                            .text("lat ms")
+                            .step_by(5.0),
+                    );
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

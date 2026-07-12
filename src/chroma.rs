@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 static FFT_PLANNER: OnceLock<Mutex<FftPlanner<f32>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -340,6 +343,12 @@ pub fn detect_key_via_cli(
     cmd.arg("-n").arg("standard").arg(&wav_path);
     if let Some(ref dir) = cli_dir {
         cmd.current_dir(dir);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Verberg terminal venster voor het subproces
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let output = cmd
         .output()
