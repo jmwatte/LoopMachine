@@ -26,6 +26,9 @@ pub struct SessionState {
     /// Latency compensatie (ms) voor marker plaatsen tijdens afspelen.
     #[serde(default)]
     pub playback_latency_ms: f32,
+    /// Correctie (ms) voor auto-beat detectie (+ = later, - = vroeger).
+    #[serde(default)]
+    pub beat_offset_ms: f32,
 }
 
 impl SessionState {
@@ -44,6 +47,7 @@ impl SessionState {
         last_directory: Option<&str>,
         bpm_threshold: f32,
         playback_latency_ms: f32,
+        beat_offset_ms: f32,
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),
@@ -60,6 +64,7 @@ impl SessionState {
             last_directory: last_directory.map(|s| s.to_string()),
             bpm_threshold,
             playback_latency_ms,
+            beat_offset_ms,
         };
         if let Ok(json) = serde_json::to_string_pretty(&state) {
             let _ = std::fs::write(SESSION_FILE, json);

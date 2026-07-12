@@ -50,8 +50,10 @@ pub struct LoopEditorApp {
     pub bpm_beat_positions: Option<Vec<(f32, f32)>>,
     /// Drempelwaarde voor beat-detectie (0.0-1.0), hoe hoger hoe strenger
     pub bpm_threshold: f32,
-    /// Latency compensatie (ms) voor marker plaatsing tijdens afspelen
+    /// Latency compensatie (ms) voor marker plaatsen tijdens afspelen.
     pub playback_latency_ms: f32,
+    /// Correctie (ms) voor auto-beat detectie offset (+ = later, - = vroeger)
+    pub beat_offset_ms: f32,
     // File path input
     pub file_path: String,
     pub status_message: String,
@@ -172,6 +174,7 @@ impl LoopEditorApp {
             bpm_beat_positions: None,
             bpm_threshold: 0.3,
             playback_latency_ms: 40.0,
+            beat_offset_ms: 0.0,
             file_path: String::new(),
             status_message: String::new(),
             status_message_timer: 0,
@@ -247,6 +250,7 @@ impl LoopEditorApp {
             app.arr_parse_buf = session.arr_parse_buf;
             app.bpm_threshold = session.bpm_threshold;
             app.playback_latency_ms = session.playback_latency_ms;
+            app.beat_offset_ms = session.beat_offset_ms;
             // Herstel laatste directory voor file dialog
             if let Some(ref dir) = session.last_directory {
                 if Path::new(dir).exists() {
@@ -437,9 +441,10 @@ impl LoopEditorApp {
                 continue;
             }
             count += 1;
+            let adjusted_pos = (pos_secs + self.beat_offset_ms / 1000.0).max(0.0);
             self.waveform_state.markers.push(crate::waveform::Marker {
                 name: format!("B{}", count),
-                position_secs: pos_secs,
+                position_secs: adjusted_pos,
                 kind: MarkerKind::Beat,
             });
         }
@@ -702,6 +707,7 @@ impl LoopEditorApp {
             self.file_dialog_last_dir.as_deref(),
             self.bpm_threshold,
             self.playback_latency_ms,
+            self.beat_offset_ms,
         );
     }
 
@@ -2109,16 +2115,22 @@ impl eframe::App for LoopEditorApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{:.1}s  |  {} Hz  |  Zoom: {}x",
-                                self.waveform_state.duration_secs,
-                                self.waveform_state.sample_rate,
-                                (self.waveform_state.zoom / 50.0 * 100.0) as u32
-                            ))
-                            .size(11.0)
-                            .color(Color32::GRAY),
+                        let mut info = format!(
+                            "{:.1}s  |  {} Hz  |  Zoom: {}x",
+                            self.waveform_state.duration_secs,
+                            self.waveform_state.sample_rate,
+                            (self.waveform_state.zoom / 50.0 * 100.0) as u32
                         );
+                        if let (Some(a), Some(b)) = (
+                            self.waveform_state.loop_a_secs,
+                            self.waveform_state.loop_b_secs,
+                        ) {
+                            if b > a {
+                                let len_ms = (b - a) * 1000.0;
+                                info = format!("A-B: {:.1}s ({:.0}ms)  |  {}", b - a, len_ms, info);
+                            }
+                        }
+                        ui.label(RichText::new(info).size(11.0).color(Color32::GRAY));
                     });
                 });
             }
@@ -2615,8 +2627,13 @@ impl eframe::App for LoopEditorApp {
                                     ui.label("↓");
                                     ui.add(
                                         egui::Slider::new(&mut self.bpm_threshold, 0.0..=1.0)
-                                            .text("drempel")
+                                            .text("dr")
                                             .step_by(0.05),
+                                    );
+                                    ui.add(
+                                        egui::Slider::new(&mut self.beat_offset_ms, -50.0..=50.0)
+                                            .text("off ms")
+                                            .step_by(1.0),
                                     );
                                     if ui.small_button("📌 Beats").clicked() {
                                         self.place_bpm_markers();
