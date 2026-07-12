@@ -1,3 +1,4 @@
+use crate::shortcuts::ToolbarAction;
 use serde::{Deserialize, Serialize};
 
 const SESSION_FILE: &str = "session.json";
@@ -29,9 +30,9 @@ pub struct SessionState {
     /// Correctie (ms) voor auto-beat detectie offset (+ = later, - = vroeger).
     #[serde(default)]
     pub beat_offset_ms: f32,
-    /// User-definable toolbar knoppen (opgeslagen als strings via serde).
+    /// User-definable toolbar knoppen.
     #[serde(default)]
-    pub toolbar_buttons: Option<Vec<String>>,
+    pub toolbar_buttons: Option<Vec<ToolbarAction>>,
 }
 
 impl SessionState {
@@ -51,7 +52,7 @@ impl SessionState {
         bpm_threshold: f32,
         playback_latency_ms: f32,
         beat_offset_ms: f32,
-        toolbar_buttons: &[String],
+        toolbar_buttons: &[ToolbarAction],
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),

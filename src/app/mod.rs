@@ -292,13 +292,9 @@ impl LoopEditorApp {
             app.playback_latency_ms = session.playback_latency_ms;
             app.beat_offset_ms = session.beat_offset_ms;
             // Herstel toolbar buttons uit sessie
-            if let Some(ref btn_strings) = session.toolbar_buttons {
-                let parsed: Vec<ToolbarAction> = btn_strings
-                    .iter()
-                    .filter_map(|s| serde_json::from_str(&format!("\"{s}\"")).ok())
-                    .collect();
-                if !parsed.is_empty() {
-                    app.toolbar_buttons = parsed;
+            if let Some(ref buttons) = session.toolbar_buttons {
+                if !buttons.is_empty() {
+                    app.toolbar_buttons = buttons.clone();
                 }
             }
             // Herstel laatste directory voor file dialog
@@ -743,12 +739,6 @@ impl LoopEditorApp {
     /// Sla huidige state op in session.json (voor herstart).
     fn save_session(&self) {
         let mode_str = format!("{:?}", self.waveform_state.channel_mode);
-        let toolbar_strings: Vec<String> = self
-            .toolbar_buttons
-            .iter()
-            .map(|a| serde_json::to_string(a).unwrap_or_default())
-            .filter(|s| !s.is_empty())
-            .collect();
         SessionState::save(
             self.waveform_state.path.as_deref(),
             self.waveform_play_position,
@@ -765,7 +755,7 @@ impl LoopEditorApp {
             self.bpm_threshold,
             self.playback_latency_ms,
             self.beat_offset_ms,
-            &toolbar_strings,
+            &self.toolbar_buttons,
         );
     }
 
