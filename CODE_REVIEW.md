@@ -176,7 +176,10 @@ impl UndoState {
 
 | Feature | Beschrijving |
 |---------|-------------|
-| ✅ BPM detectie + beat markers | Beat-tracking toegevoegd; 📌 Beats-knop plaatst markers op elke beat |
+| ✅ BPM detectie + beat markers | SoundTouch BPMDetect + beat posities; 📌 Beats-knop plaatst markers |
+| ✅ Marker-BPM | BPM uit handmatige beat markers (B-toets) + "↗ Verleng" over hele track |
+| ✅ Toolbar met actieknoppen | Tweede werkbalk onder file-toolbar met Detect, Verleng, Wis loop, Undo/Redo |
+| User-definable toolbar | Zie plan hieronder |
 | Tap tempo | Druk op `T` in ritme om BPM in te stellen |
 | Quantize markers | Rond marker posities af op BPM-grid |
 | Crossfade tussen arrangement-stappen | 10ms crossfade in SequenceSource |
@@ -191,3 +194,31 @@ impl UndoState {
 ---
 
 > **Hoe aan te pakken:** Begin bij Fase 1, item 1. De items zijn klein en onafhankelijk, maar de volgorde zorgt dat latere refactors (Fase 3-5) profiteren van eerdere opruimwerk.
+
+---
+
+## User-definable toolbar — Plan
+
+### Doel
+Gebruikers kunnen zelf kiezen welke knoppen in de actie-werkbalk verschijnen, in welke volgorde.
+
+### Huidige situatie
+De actie-werkbalk (`action_toolbar`) heeft hardcoded knoppen: 🔍 Detecteer, ↗ Verleng beats, ✕ Wis loop, ↩ Undo, ↪ Redo. Een aantal andere acties (📌 Beats, 💾 Save Loop, 🎯 Center Loop, 🔍−/+, ⟲ Reset) zitten nog in de CentralPanel of elders.
+
+### Stappenplan
+
+| # | Stap | Bestand | Beschrijving |
+|---|------|---------|-------------|
+| 1 | **Nieuwe enum `ToolbarAction`** | `shortcuts.rs` | Definieer een set acties die als knop kunnen verschijnen (bv. `Detect`, `ExtendBeats`, `ClearLoop`, `Undo`, `Redo`, `SaveLoop`, `CenterLoop`, `ZoomIn`, `ZoomOut`, `ResetZoom`, `PlaceBeats`, `ToggleArranger`, `Export`). De `ShortcutAction` enum is te uitgebreid (bevat ook shortcuts zonder zinvolle knop zoals `SeekForward`). Een aparte `ToolbarAction`-enum of een subset van `ShortcutAction` is beter. |
+| 2 | **Velden in `LoopEditorApp`** | `app/mod.rs` | Voeg `toolbar_buttons: Vec<ToolbarAction>` toe. Default: de huidige set knoppen. |
+| 3 | **Persisteer in `session.json`** | `session.rs` | Voeg `toolbar_buttons: Vec<String>` (serde) toe aan `SessionState`. Bij laden: deserialiseer naar `Vec<ToolbarAction>`. |
+| 4 | **Dynamische toolbar renderen** | `app/mod.rs` | Vervang de hardcoded knoppen door een loop over `self.toolbar_buttons`. Elke `ToolbarAction` heeft een `fn render(ui, app)` of match die de juiste knop toont. |
+| 5 | **Customize-venster** | `app/mod.rs` of `ui_shortcuts.rs` | Rechterklik op toolbar → "Toolbar aanpassen..." → opent lijst met beschikbare acties. Sleep/drag om volgorde te wijzigen. Checkboxes om acties aan/uit te zetten. |
+| 6 | **Sneltoetsintegratie** | `shortcuts.rs` | Elke `ToolbarAction` wijst naar een `ShortcutAction`. De knop toont de sneltoets in de hover-text (bv. "Opslaan (Ctrl+S)"). |
+| 7 | **Scheid UI van logica** | `app/mod.rs` | Momenteel staat de logica voor elke actie verspreid over `update()`. Door `run_detection()`, `extend_beat_markers()` etc. hebben we al losse methodes. Zet ook de andere acties (save loop, center, zoom) in methodes zodat de toolbar er één regel per knop van is. |
+
+### Overwegingen
+
+- **Grootte:** De toolbar moet compact blijven. Knoppen met iconen (emoji) + max 1-2 woorden.
+- **Context-afhankelijk:** Sommige knoppen zijn alleen zinvol als er een audiofile geladen is, of een A-B selectie actief is. De toolbar kan deze grijs maken of verbergen.
+- **Standaard instelling:** Bij eerste start de huidige set knoppen. Power-users kunnen uitbreiden.

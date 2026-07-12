@@ -331,6 +331,51 @@ impl LoopEditorApp {
         }
     }
 
+    /// Bereken BPM uit handmatig geplaatste beat markers (B-toets).
+    /// Gebruikt de mediane interval tussen opeenvolgende markers.
+    fn bpm_from_markers(markers: &[crate::waveform::Marker]) -> String {
+        use crate::waveform::MarkerKind;
+
+        // Verzamel alleen beat markers, gesorteerd
+        let mut beats: Vec<f32> = markers
+            .iter()
+            .filter(|m| m.kind == MarkerKind::Beat)
+            .map(|m| m.position_secs)
+            .collect();
+        beats.sort_by(|a, b| a.total_cmp(b));
+
+        if beats.len() < 2 {
+            return format!(
+                "Marker-BPM: -- ({} beat{})",
+                beats.len(),
+                if beats.len() == 1 { "" } else { "s" }
+            );
+        }
+
+        // Bereken intervallen
+        let mut intervals: Vec<f32> = beats.windows(2).map(|w| w[1] - w[0]).collect();
+
+        // Filter outliers: verwijder intervallen die >50% afwijken van mediaan
+        intervals.sort_by(|a, b| a.total_cmp(b));
+        let median = intervals[intervals.len() / 2];
+        intervals.retain(|&i| (i - median).abs() / median.max(0.01) < 0.5);
+
+        if intervals.is_empty() {
+            return "Marker-BPM: -- (te variabel)".to_string();
+        }
+
+        // Herbereken mediaan van gefilterde set
+        let mid = intervals.len() / 2;
+        let filtered_median = if intervals.len() % 2 == 0 {
+            (intervals[mid - 1] + intervals[mid]) / 2.0
+        } else {
+            intervals[mid]
+        };
+
+        let bpm = 60.0 / filtered_median;
+        format!("Marker-BPM: {:.1} ({} beats)", bpm, beats.len())
+    }
+
     /// Zet BPM-beat posities om naar echte markers in de waveform.
     /// Alleen beats boven de 0.3 strength worden geplaatst (filtert ruis).
     fn place_bpm_markers(&mut self) {
@@ -368,6 +413,127 @@ impl LoopEditorApp {
             "{} BPM markers geplaatst (strength > {:.0}%)",
             count,
             min_strength * 100.0
+        );
+        self.status_message_timer = 5 * 60;
+    }
+
+    /// Voer volledige detectie uit: chroma (K-S/LK), keyfinder-cli, BPM.
+    fn run_detection(&mut self) {
+        let samples = &self.waveform_state.samples;
+        let sr = self.waveform_state.sample_rate;
+        let a = self.waveform_state.loop_a_secs;
+        let b = self.waveform_state.loop_b_secs;
+        if !samples.is_empty() && sr > 0 {
+            self.chroma_result = Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
+            self.bass_chroma = Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
+            if let Some(bass) = self.bass_chroma {
+                let ks_top = bass.top_candidates(3);
+                let lk_top = bass.top_candidates_lk(3);
+                let ks_keys: String = ks_top
+                    .iter()
+                    .map(|(r, m, c)| {
+                        format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let lk_keys: String = lk_top
+                    .iter()
+                    .map(|(r, m, c)| {
+                        format!("{} ({:.0}%)", Chroma::key_name_static(*r, *m), c * 100.0)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                self.status_message = format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
+                self.status_message_timer = 5 * 60;
+            }
+            // Keyfinder-cli
+            match detect_key_via_cli(samples, sr, a, b) {
+                Ok(kf_key) => {
+                    self.keyfinder_cli_result = Some(Ok(kf_key.clone()));
+                    self.status_message = format!("{}  |  KF: {}", self.status_message, kf_key);
+                }
+                Err(e) => {
+                    self.keyfinder_cli_result = Some(Err(e.clone()));
+                    self.status_message = format!("{}  |  KF-fout: {}", self.status_message, e);
+                    self.status_message_timer = 5 * 60;
+                }
+            }
+            // BPM detectie
+            self.bpm_result = detect_bpm(samples, sr, a, b);
+            self.bpm_beat_positions = detect_beats(samples, sr, a, b);
+            if let Some(bpm) = self.bpm_result {
+                self.status_message = format!("{}  |  BPM: {:.1}", self.status_message, bpm);
+            }
+        }
+    }
+
+    /// Verleng handmatige beat markers over de hele audiofile.
+    /// Berekent BPM uit bestaande markers en plaatst er nieuwe bij van 0s tot einde.
+    fn extend_beat_markers(&mut self) {
+        use crate::waveform::{Marker, MarkerKind};
+
+        // Bepaal BPM en offset uit bestaande beat markers
+        let mut beats: Vec<f32> = self
+            .waveform_state
+            .markers
+            .iter()
+            .filter(|m| m.kind == MarkerKind::Beat)
+            .map(|m| m.position_secs)
+            .collect();
+        beats.sort_by(|a, b| a.total_cmp(b));
+
+        if beats.len() < 2 {
+            self.status_message = "Zet eerst minstens 2 beat markers (B-toets)".to_string();
+            self.status_message_timer = 3 * 60;
+            return;
+        }
+
+        let duration = self.waveform_state.duration_secs;
+        if duration <= 0.0 {
+            return;
+        }
+
+        // Bereken gemiddeld interval
+        let intervals: Vec<f32> = beats.windows(2).map(|w| w[1] - w[0]).collect();
+        let avg_interval: f32 = intervals.iter().sum::<f32>() / intervals.len() as f32;
+        if avg_interval <= 0.0 {
+            return;
+        }
+
+        // Bepaal offset = het gemiddelde verschil tussen marker posities en hun "grid"-plek
+        // Eerste marker bepaalt de fase
+        let first_beat = beats[0];
+        // Zoek beste offset door alle markers te gebruiken: minimaliseer som van afwijkingen
+        let mut best_offset = first_beat % avg_interval;
+        // Zorg dat offset niet te dicht bij 0 of avg_interval zit
+        if best_offset < 0.0 {
+            best_offset += avg_interval;
+        }
+
+        // Verwijder oude beat markers
+        self.waveform_state
+            .markers
+            .retain(|m| m.kind != MarkerKind::Beat);
+
+        // Plaats nieuwe beat markers van begin tot einde
+        let mut pos = best_offset;
+        let mut count = 0;
+        while pos < duration {
+            count += 1;
+            self.waveform_state.markers.push(Marker {
+                name: format!("B{}", count),
+                position_secs: pos,
+                kind: MarkerKind::Beat,
+            });
+            pos += avg_interval;
+        }
+
+        let bpm = 60.0 / avg_interval;
+        self.push_undo();
+        self.sync_markers_to_library();
+        self.status_message = format!(
+            "Beat verlengd: {} markers geplaatst ({:.1} BPM)",
+            count, bpm
         );
         self.status_message_timer = 5 * 60;
     }
@@ -840,6 +1006,12 @@ impl eframe::App for LoopEditorApp {
                     self.push_undo();
                     self.sync_markers_to_library();
                     self.status_message_timer = 3 * 60;
+                    // Update BPM uit markers
+                    self.status_message = format!(
+                        "{}  |  {}",
+                        self.status_message,
+                        Self::bpm_from_markers(&self.waveform_state.markers)
+                    );
                 }
 
                 if self.shortcuts.is_pressed(
@@ -1645,6 +1817,95 @@ impl eframe::App for LoopEditorApp {
             ui.add_space(4.0);
         });
 
+        // ── Actie werkbalk (onder file toolbar) ──
+        egui::TopBottomPanel::top("action_toolbar").show(ctx, |ui| {
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                // Detecteer noten
+                if ui
+                    .button("🔍 Detecteer")
+                    .on_hover_text("Analyseer A-B selectie op toonhoogtes en BPM")
+                    .clicked()
+                {
+                    self.run_detection();
+                }
+
+                // Verleng beats (alleen zichtbaar als er >= 2 beat markers zijn)
+                let beat_count = self
+                    .waveform_state
+                    .markers
+                    .iter()
+                    .filter(|m| m.kind == crate::waveform::MarkerKind::Beat)
+                    .count();
+                if beat_count >= 2 {
+                    if ui
+                        .button("↗ Verleng beats")
+                        .on_hover_text("Verspreid beat markers over de hele audio")
+                        .clicked()
+                    {
+                        self.extend_beat_markers();
+                    }
+                }
+
+                ui.add_space(8.0);
+
+                // Clear loop
+                if self.waveform_state.loop_a_secs.is_some() {
+                    if ui
+                        .button("✕ Wis loop")
+                        .on_hover_text("Verwijder A-B selectie (Ctrl+Backspace)")
+                        .clicked()
+                    {
+                        self.waveform_state.loop_a_secs = None;
+                        self.waveform_state.loop_b_secs = None;
+                        self.pending_loop_point = None;
+                        self.push_undo();
+                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                            a_secs: 0.0,
+                            b_secs: 0.0,
+                        });
+                        self.status_message = "Loop gewist".to_string();
+                        self.status_message_timer = 2 * 60;
+                    }
+                }
+
+                // Undo / Redo
+                if !self.undo_stack.is_empty()
+                    && ui
+                        .button("↩ Undo")
+                        .on_hover_text("Ongedaan maken (Ctrl+Z)")
+                        .clicked()
+                {
+                    if let Some(state) = self.undo_stack.pop() {
+                        self.redo_stack.push(UndoState::snapshot_from(self));
+                        self.restore_undo(state);
+                    }
+                }
+                if !self.redo_stack.is_empty()
+                    && ui
+                        .button("↪ Redo")
+                        .on_hover_text("Opnieuw doen (Ctrl+Y)")
+                        .clicked()
+                {
+                    if let Some(state) = self.redo_stack.pop() {
+                        self.undo_stack.push(UndoState::snapshot_from(self));
+                        self.restore_undo(state);
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !self.status_message.is_empty() {
+                        ui.label(
+                            RichText::new(&self.status_message)
+                                .size(12.0)
+                                .color(Color32::from_rgb(100, 200, 100)),
+                        );
+                    }
+                });
+            });
+            ui.add_space(2.0);
+        });
+
         self.show_shortcuts_help(ctx);
 
         // ── Hoofdpaneel ──
@@ -2137,70 +2398,7 @@ impl eframe::App for LoopEditorApp {
                         .on_hover_text("Analyseer de A-B selectie op toonhoogtes")
                         .clicked()
                     {
-                        let samples = &self.waveform_state.samples;
-                        let sr = self.waveform_state.sample_rate;
-                        let a = self.waveform_state.loop_a_secs;
-                        let b = self.waveform_state.loop_b_secs;
-                        if !samples.is_empty() && sr > 0 {
-                            self.chroma_result =
-                                Some(detect_chroma(samples, sr, a, b, ChromaMode::Full));
-                            self.bass_chroma =
-                                Some(detect_chroma(samples, sr, a, b, ChromaMode::Bass));
-                            if let Some(bass) = self.bass_chroma {
-                                let ks_top = bass.top_candidates(3);
-                                let lk_top = bass.top_candidates_lk(3);
-                                let ks_keys: String = ks_top
-                                    .iter()
-                                    .map(|(r, m, c)| {
-                                        format!(
-                                            "{} ({:.0}%)",
-                                            Chroma::key_name_static(*r, *m),
-                                            c * 100.0
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" | ");
-                                let lk_keys: String = lk_top
-                                    .iter()
-                                    .map(|(r, m, c)| {
-                                        format!(
-                                            "{} ({:.0}%)",
-                                            Chroma::key_name_static(*r, *m),
-                                            c * 100.0
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" | ");
-                                self.status_message =
-                                    format!("K-S: {}  /  LK: {}", ks_keys, lk_keys);
-                                self.status_message_timer = 5 * 60;
-                            }
-                            // Keyfinder-cli externe detectie (via temp WAV, omzeilt FFmpeg decodeerproblemen)
-                            if !samples.is_empty() && sr > 0 {
-                                match detect_key_via_cli(samples, sr, a, b) {
-                                    Ok(kf_key) => {
-                                        self.keyfinder_cli_result = Some(Ok(kf_key.clone()));
-                                        self.status_message =
-                                            format!("{}  |  KF: {}", self.status_message, kf_key);
-                                    }
-                                    Err(e) => {
-                                        self.keyfinder_cli_result = Some(Err(e.clone()));
-                                        self.status_message =
-                                            format!("{}  |  KF-fout: {}", self.status_message, e);
-                                        self.status_message_timer = 5 * 60;
-                                    }
-                                }
-                            }
-                            // BPM detectie (SoundTouch)
-                            if !samples.is_empty() && sr > 0 {
-                                self.bpm_result = detect_bpm(samples, sr, a, b);
-                                self.bpm_beat_positions = detect_beats(samples, sr, a, b);
-                                if let Some(bpm) = self.bpm_result {
-                                    self.status_message =
-                                        format!("{}  |  BPM: {:.1}", self.status_message, bpm);
-                                }
-                            }
-                        }
+                        self.run_detection();
                     }
 
                     // ── Chroma visualisatie ──
@@ -2327,6 +2525,32 @@ impl eframe::App for LoopEditorApp {
                                 );
                             }
                         }
+
+                        // Marker-BPM (uit handmatige beat markers) + extend knop
+                        ui.horizontal(|ui| {
+                            let marker_bpm_label =
+                                Self::bpm_from_markers(&self.waveform_state.markers);
+                            let has_marker_bpm = self
+                                .waveform_state
+                                .markers
+                                .iter()
+                                .filter(|m| m.kind == crate::waveform::MarkerKind::Beat)
+                                .count()
+                                >= 2;
+                            ui.label(
+                                RichText::new(&marker_bpm_label)
+                                    .size(13.0)
+                                    .color(Color32::from_rgb(160, 180, 200)),
+                            );
+                            if has_marker_bpm
+                                && ui
+                                    .small_button("↗ Verleng")
+                                    .on_hover_text("Verspreid beat markers over de hele audio")
+                                    .clicked()
+                            {
+                                self.extend_beat_markers();
+                            }
+                        });
 
                         // Sterkste noot
                         ui.label(
