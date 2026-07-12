@@ -1,6 +1,7 @@
 pub mod ui_arranger;
 pub mod ui_export;
 pub mod ui_library;
+pub mod ui_setup;
 pub mod ui_shortcuts;
 use self::ui_export::{ExportFormat, ExportMode, ExportParams, ExportState};
 use crate::arrangement::{color_for_arranger, Arrangement};
@@ -16,8 +17,8 @@ use crossbeam_channel::{Receiver, Sender};
 use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::FileDialog;
 use std::path::Path;
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::{Arc, Mutex};
 
 // ───────────────────────────────────────────────
 pub struct LoopEditorApp {
@@ -102,6 +103,25 @@ pub struct LoopEditorApp {
     // Loop label rename
     editing_loop_label: Option<usize>,
     editing_loop_label_buf: String,
+
+    // ── Setup / Kalibratie ──
+    pub show_setup: bool,
+    /// Gedeelde click-posities voor audit (seconden), thread-safe.
+    pub click_positions: Arc<Mutex<Vec<f32>>>,
+    /// Audit modus aan/uit
+    pub click_enabled: Arc<AtomicBool>,
+    /// True = clicks op BPM beats, false = clicks op markers
+    pub click_on_bpm: bool,
+    /// Kalibratie flits countdown (0 = geen flits)
+    pub calibration_flash: u32,
+    /// Alle click posities voor de kalibratie (wordt één voor één afgeflitst)
+    pub calibration_click_positions: Vec<f32>,
+    /// Index van de volgende calibratie-click om te flitsen
+    pub calibration_next_idx: usize,
+    /// Kalibratie is actief en wacht op de playhead
+    pub calibration_active: bool,
+    /// Bulk-shift waarde voor markers (ms), persistent in de UI
+    pub bulk_shift_ms: i32,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -225,6 +245,17 @@ impl LoopEditorApp {
             confirm_delete_track: None,
             editing_loop_label: None,
             editing_loop_label_buf: String::new(),
+
+            // ── Setup / Kalibratie ──
+            show_setup: false,
+            click_positions: Arc::new(Mutex::new(Vec::new())),
+            click_enabled: Arc::new(AtomicBool::new(false)),
+            click_on_bpm: true,
+            calibration_flash: 0,
+            calibration_click_positions: Vec::new(),
+            calibration_next_idx: 0,
+            calibration_active: false,
+            bulk_shift_ms: 0,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -434,7 +465,8 @@ impl LoopEditorApp {
             .retain(|m| m.kind != MarkerKind::Beat);
 
         // Plaats markers op elke beat (boven minimale strength)
-        let min_strength = self.bpm_threshold;
+        // Zelfs bij drempel 0.0 skippen we extreem zwakke beats (< 1% van max)
+        let min_strength = self.bpm_threshold.max(0.01);
         let mut count = 0;
         for &(pos_secs, strength) in beats {
             if strength < min_strength {
@@ -869,8 +901,11 @@ impl eframe::App for LoopEditorApp {
             }
         }
 
+        // ── Kalibratie flits bewaking ──
+        self.check_calibration_flash();
+
         // 🔥 CRITICAL: Force continuous repaints while playing so the playhead moves smoothly
-        if self.waveform_is_playing {
+        if self.waveform_is_playing || self.calibration_active {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
@@ -953,6 +988,8 @@ impl eframe::App for LoopEditorApp {
                             self.waveform_state.pitch_semitones,
                         ))),
                         tempo: Arc::new(AtomicU32::new(f32::to_bits(self.waveform_state.tempo))),
+                        click_positions: self.click_positions.clone(),
+                        click_enabled: self.click_enabled.clone(),
                     });
 
                     self.waveform_is_playing = true;
@@ -1000,6 +1037,10 @@ impl eframe::App for LoopEditorApp {
                     self.push_undo();
                     self.sync_markers_to_library();
                     self.status_message_timer = 3 * 60;
+                    // Ververs click-posities voor audit
+                    if !self.click_on_bpm {
+                        self.update_click_positions();
+                    }
                 }
 
                 if self
@@ -1031,6 +1072,10 @@ impl eframe::App for LoopEditorApp {
                     self.push_undo();
                     self.sync_markers_to_library();
                     self.status_message_timer = 3 * 60;
+                    // Ververs click-posities voor audit
+                    if !self.click_on_bpm {
+                        self.update_click_positions();
+                    }
                 }
 
                 if self
@@ -1061,6 +1106,10 @@ impl eframe::App for LoopEditorApp {
                         self.status_message,
                         Self::bpm_from_markers(&self.waveform_state.markers)
                     );
+                    // Ververs click-posities voor audit
+                    if !self.click_on_bpm {
+                        self.update_click_positions();
+                    }
                 }
 
                 if self.shortcuts.is_pressed(
@@ -1104,6 +1153,10 @@ impl eframe::App for LoopEditorApp {
                             self.sync_markers_to_library();
                             self.status_message = format!("Marker '{}' verwijderd", removed.name);
                             self.status_message_timer = 3 * 60;
+                            // Ververs click-posities voor audit
+                            if !self.click_on_bpm {
+                                self.update_click_positions();
+                            }
                         }
                     }
                 }
@@ -1715,6 +1768,8 @@ impl eframe::App for LoopEditorApp {
                                 tempo: Arc::new(AtomicU32::new(f32::to_bits(
                                     self.waveform_state.tempo,
                                 ))),
+                                click_positions: self.click_positions.clone(),
+                                click_enabled: self.click_enabled.clone(),
                             });
                             self.waveform_is_playing = true;
                             self.waveform_has_content = true;
@@ -1740,6 +1795,8 @@ impl eframe::App for LoopEditorApp {
                             tempo: Arc::new(AtomicU32::new(f32::to_bits(
                                 self.waveform_state.tempo,
                             ))),
+                            click_positions: self.click_positions.clone(),
+                            click_enabled: self.click_enabled.clone(),
                         });
                         self.waveform_is_playing = true;
                         self.waveform_has_content = true;
@@ -1988,15 +2045,30 @@ impl eframe::App for LoopEditorApp {
                     }
                 }
 
-                // Latency compensatie slider (alleen als audio speelt)
-                if self.waveform_is_playing {
-                    ui.add_space(4.0);
-                    ui.label("⏱");
-                    ui.add(
-                        egui::Slider::new(&mut self.playback_latency_ms, 0.0..=150.0)
-                            .text("lat ms")
-                            .step_by(5.0),
-                    );
+                // ⚙ Setup knop (latency + kalibratie + audit)
+                if ui
+                    .button("\u{2699} Setup")
+                    .on_hover_text("Open setup-venster voor latency, kalibratie en beat audit")
+                    .clicked()
+                {
+                    self.show_setup = !self.show_setup;
+                }
+
+                // Audit toggle knop
+                let audit_on = self
+                    .click_enabled
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let audit_label = if audit_on {
+                    "\u{1F50A} Audit: AAN"
+                } else {
+                    "\u{1F507} Audit"
+                };
+                if ui
+                    .button(audit_label)
+                    .on_hover_text("Schakel beat-audit kliktrack aan/uit")
+                    .clicked()
+                {
+                    self.toggle_beat_audit();
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2276,6 +2348,8 @@ impl eframe::App for LoopEditorApp {
                                     tempo: Arc::new(AtomicU32::new(f32::to_bits(
                                         self.waveform_state.tempo,
                                     ))),
+                                    click_positions: self.click_positions.clone(),
+                                    click_enabled: self.click_enabled.clone(),
                                 });
                                 self.waveform_is_playing = true;
                                 self.loop_iteration_count = 1; // 1e play-through
@@ -2728,6 +2802,7 @@ impl eframe::App for LoopEditorApp {
         self.show_library_window(ctx);
         self.show_confirm_delete(ctx);
         self.show_shortcut_editor(ctx);
+        self.show_setup_window(ctx);
         // ── File dialog (egui-native, geen Windows COM issues) ──
         self.file_dialog.update(ctx);
 

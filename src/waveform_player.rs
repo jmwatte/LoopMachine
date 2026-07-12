@@ -17,6 +17,10 @@ pub enum WaveformCommand {
         b_sample: usize,
         pitch_semitones: Arc<AtomicU32>,
         tempo: Arc<AtomicU32>,
+        /// Beat click posities (seconden) voor audit-modus.
+        click_positions: Arc<Mutex<Vec<f32>>>,
+        /// Schakelaar voor click-generatie.
+        click_enabled: Arc<AtomicBool>,
     },
     Stop,
     #[allow(dead_code)]
@@ -170,6 +174,8 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                     b_sample,
                     pitch_semitones: ps,
                     tempo: t,
+                    click_positions: ref incoming_clicks,
+                    click_enabled: ref incoming_enabled,
                 } => {
                     samples = new_samples.clone();
                     pitch_semitones.store(ps.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -208,6 +214,8 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                         continue;
                     }
 
+                    // Gebruik de UI-thread z'n Arc's direct, zodat click-posities
+                    // live updaten zonder de playback te herstarten.
                     let source = SoundTouchSource::new(
                         samples.clone(),
                         sr,
@@ -218,6 +226,8 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                         seek_requested.clone(),
                         seek_target.clone(),
                         volume.clone(),
+                        incoming_clicks.clone(),
+                        incoming_enabled.clone(),
                     );
 
                     if let Some(s) = &sink {
@@ -477,11 +487,7 @@ fn process_through_timestretch(
 }
 
 /// Flush wat er nog in TimeStretch zit na einde van de input.
-fn flush_timestretch(
-    ts: &mut TimeStretch,
-    out_buf: &mut Vec<f32>,
-    flush_buf: &mut Vec<f32>,
-) {
+fn flush_timestretch(ts: &mut TimeStretch, out_buf: &mut Vec<f32>, flush_buf: &mut Vec<f32>) {
     let received = ts.receive_samples(flush_buf, 4096);
     if received > 0 {
         out_buf.extend_from_slice(&flush_buf[..received]);
@@ -526,6 +532,9 @@ struct SoundTouchSource {
     input_chunk: Vec<f32>,
     temp_out: Vec<f32>,
     flush_buf: Vec<f32>,
+    // ── Click/audit generatie ──
+    click_positions: Arc<Mutex<Vec<f32>>>,
+    click_enabled: Arc<AtomicBool>,
 }
 
 // ───────────────────────────────────────────────
@@ -666,11 +675,7 @@ impl SequenceSource {
                 }
                 // Einde arrangement
                 let _ = self.step_event_tx.send(WaveformEvent::ArrangementFinished);
-                flush_timestretch(
-                    &mut self.ts,
-                    &mut self.out_buf,
-                    &mut self.flush_buf,
-                );
+                flush_timestretch(&mut self.ts, &mut self.out_buf, &mut self.flush_buf);
                 break;
             }
 
@@ -741,6 +746,8 @@ impl SoundTouchSource {
         seek_requested: Arc<AtomicBool>,
         seek_target: Arc<AtomicU64>,
         volume: Arc<AtomicU32>,
+        click_positions: Arc<Mutex<Vec<f32>>>,
+        click_enabled: Arc<AtomicBool>,
     ) -> Self {
         let total_frames = raw_samples.len();
 
@@ -790,6 +797,8 @@ impl SoundTouchSource {
             input_chunk: Vec::with_capacity(4096),
             temp_out: vec![0.0; 4096],
             flush_buf: vec![0.0; 4096],
+            click_positions,
+            click_enabled,
         }
     }
 
@@ -886,6 +895,51 @@ impl SoundTouchSource {
                     break;
                 }
                 self.out_buf.extend_from_slice(&self.temp_out[..received]);
+            }
+        }
+
+        // ── Click-generatie voor beat audit ──
+        // Mix clicks direct in de output buffer op de marker-posities.
+        // Omdat dit NA SoundTouch gebeurt maar VOOR rodio's buffering,
+        // zijn de clicks sample-accuraat synced met de audio.
+        if self.click_enabled.load(Ordering::Relaxed) && !self.out_buf.is_empty() {
+            let sr = self.sample_rate as f64;
+            let tempo = self.cached_tempo;
+            let buf_len = self.out_buf.len();
+
+            // Bereken het sample-bereik dat deze buffer beslaat in de INPUT
+            let buf_start_sample = self.current_audio_pos;
+            let buf_end_sample = buf_start_sample + buf_len as f64 * tempo;
+
+            let positions = self.click_positions.lock().unwrap();
+            for &click_sec in positions.iter() {
+                let click_sample = click_sec as f64 * sr;
+
+                // Check of de click binnen deze buffer valt
+                if click_sample < buf_start_sample || click_sample >= buf_end_sample {
+                    continue;
+                }
+
+                // Bepaal de exacte sample-index in de output buffer
+                let out_idx_rel = ((click_sample - buf_start_sample) / tempo).round() as isize;
+                if out_idx_rel < 0 || out_idx_rel >= buf_len as isize {
+                    continue;
+                }
+                let out_idx = out_idx_rel as usize;
+
+                // Genereer een korte click (8ms sinus van 1000Hz)
+                let click_duration_samples = (sr * 0.008) as usize;
+                for j in 0..click_duration_samples {
+                    let buf_pos = out_idx + j;
+                    if buf_pos >= buf_len {
+                        break;
+                    }
+                    let t = j as f64 / sr;
+                    let click_sample_val = (t * 1000.0 * 2.0 * std::f64::consts::PI).sin() as f32;
+                    // Click op 40% volume, gemixed met bestaande audio
+                    self.out_buf[buf_pos] =
+                        (self.out_buf[buf_pos] + click_sample_val * 0.4).clamp(-1.0, 1.0);
+                }
             }
         }
     }

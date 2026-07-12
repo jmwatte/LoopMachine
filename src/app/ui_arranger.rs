@@ -210,6 +210,12 @@ impl LoopEditorApp {
                                                                                 ),
                                                                             ),
                                                                         ),
+                                                                        click_positions: self
+                                                                            .click_positions
+                                                                            .clone(),
+                                                                        click_enabled: self
+                                                                            .click_enabled
+                                                                            .clone(),
                                                                     },
                                                                 );
                                                                 self.arr_current_step = None;

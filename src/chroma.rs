@@ -443,7 +443,8 @@ pub fn detect_bpm(
 /// Detecteer individuele beat-posities in audiogesamples.
 /// Gebruikt de SoundTouch BPMDetect voor beat-tracking.
 /// Retourneert een Vec van `(position_secs, strength)` voor elke gedetecteerde beat.
-/// De `strength` is een maat voor betrouwbaarheid (0.0–1.0).
+/// De `strength` wordt genormaliseerd naar 0.0–1.0 binnen de gedetecteerde set.
+/// Posities zijn absoluut (t.o.v. begin van de file), niet relatief aan start_sec.
 pub fn detect_beats(
     samples: &[f32],
     sample_rate: u32,
@@ -483,13 +484,89 @@ pub fn detect_beats(
     let count = detector.get_beats(&mut positions, &mut strengths, max);
 
     if count > 0 {
-        let beats: Vec<(f32, f32)> = positions[..count as usize]
+        // SoundTouch rapporteert posities relatief aan het begin van de slice.
+        // We schuiven ze terug naar absolute positie in de file.
+        let offset_secs = start_sample as f32 / sample_rate as f32;
+
+        // Verzamel ruwe beats
+        let mut beats: Vec<(f32, f32)> = positions[..count as usize]
             .iter()
             .zip(strengths[..count as usize].iter())
-            .map(|(&pos, &str)| (pos, str))
+            .map(|(&pos, &s)| (pos + offset_secs, s))
             .collect();
+
+        // Normaliseer strengths naar 0.0–1.0
+        // SoundTouch rapporteert rauwe 'beat evidence' waarden die per file
+        // enorm kunnen verschillen. Door te normaliseren werkt de drempel-slider
+        // (bpm_threshold: 0.0–1.0) consistent.
+        if let Some(&max_strength) = beats.iter().map(|(_, s)| s).max_by(|a, b| a.total_cmp(b)) {
+            if max_strength > 0.0 {
+                for (_, strength) in beats.iter_mut() {
+                    *strength /= max_strength;
+                }
+            }
+        }
+
+        // ── Snap naar energie-pieken ──
+        // SoundTouch is niet sample-nauwkeurig: individuele beat posities
+        // kunnen tot ±50ms jitter hebben. We snappen elke beat naar de
+        // dichtstbijzijnde energie-piek in het audiosignaal.
+        // Dit is vooral belangrijk voor metronomen en percussie.
+        snap_beats_to_peaks(&mut beats, samples, sample_rate);
+
         Some(beats)
     } else {
         None
+    }
+}
+
+/// Snap een lijst beat-posities naar de dichtstbijzijnde energie-piek in het signaal.
+///
+/// SoundTouch's BPMDetect is goed voor BPM-schatting maar heeft jitter van
+/// typisch ±10-50ms op individuele beat posities. Deze functie corrigeert dat
+/// door elke beat naar de dichtstbijzijnde lokale energie-piek te trekken.
+///
+/// `search_window_ms` bepaalt hoe ver we zoeken (±30ms default).
+fn snap_beats_to_peaks(beats: &mut [(f32, f32)], samples: &[f32], sample_rate: u32) {
+    if beats.is_empty() || samples.is_empty() || sample_rate == 0 {
+        return;
+    }
+
+    let sr = sample_rate as f32;
+    let search_window = (0.030 * sr) as usize; // ±30ms in samples
+
+    for (pos_secs, _strength) in beats.iter_mut() {
+        let center_sample = (*pos_secs * sr) as isize;
+        let start_sample = (center_sample - search_window as isize).max(0) as usize;
+        let end_sample =
+            (center_sample + search_window as isize).min(samples.len() as isize - 1) as usize;
+
+        if end_sample <= start_sample {
+            continue;
+        }
+
+        // Vind de sample met de hoogste absolute amplitude (energie-piek)
+        let mut peak_sample = center_sample as usize;
+        let mut peak_energy = samples[peak_sample].abs();
+
+        // Gebruik een klein smooth-venster (3 samples) om ruis te verminderen
+        let mut i = start_sample;
+        while i + 2 <= end_sample {
+            let smoothed = (samples[i].abs() + samples[i + 1].abs() + samples[i + 2].abs()) / 3.0;
+            if smoothed > peak_energy {
+                peak_energy = smoothed;
+                peak_sample = i + 1; // midden van smooth venster
+            }
+            i += 1;
+        }
+
+        // Verplaats de beat naar de peak, maar niet verder dan ±20ms
+        // (voorkomt dat beats naar een verkeerde piek springen)
+        let max_shift = (0.020 * sr) as isize;
+        let current_sample = (*pos_secs * sr) as isize;
+        let mut delta = peak_sample as isize - current_sample;
+        delta = delta.clamp(-max_shift, max_shift);
+        let new_sample = (current_sample + delta).max(0) as usize;
+        *pos_secs = new_sample as f32 / sr;
     }
 }
