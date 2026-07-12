@@ -173,11 +173,13 @@ Onder de waveform wordt getoond welke markers op de huidige playhead-positie sta
 - **Bereik**: -12 tot +12 halve tonen
 - Schakel de pitch aan/uit tijdens playback
 - Reset met de `⟲` knop
+- **Toolbar**: Voeg `⬆ Pitch +1` en `⬇ Pitch −1` knoppen toe via ⋮ → Toolbar aanpassen
 
 ### Tempo
-- **Bereik**: 0.25× tot 2.0× (25% – 200%)
+- **Bereik**: 0.1× tot 3.0× (10% – 300%)
 - Past de afspeelsnelheid aan zonder toonhoogte te veranderen
 - Reset met de `⟲` knop
+- **Toolbar**: Voeg `🔄↑ Tempo +10%` en `🔄↓ Tempo −10%` knoppen toe via ⋮ → Toolbar aanpassen
 
 ### Volume
 - **Bereik**: 0.0× tot 2.0× (stil – dubbel volume)
@@ -191,10 +193,73 @@ Analyseer de A-B selectie op toonhoogtes:
 
 ---
 
-## 7. Export
+## 7. Setup — Latency & Beat Audit
+
+Het setup-venster (⚙ **Setup** in de toolbar) bevat alle instellingen voor
+latency-compensatie, beat-audit, BPM-detectie en marker-beheer.
+
+### 7.1 Latency Kalibratie
+
+Als je tijdens het afspelen een marker zet (`B`/`M`/`S`), komt deze **te laat**
+omdat de audio door de SoundTouch-processor en audiokaart-buffer moet. Deze
+vertraging verschilt per computer.
+
+#### Manual marker latency
+- **Slider**: 0–200 ms (stap 5 ms)
+- **Default**: 40 ms
+- De marker wordt zoveel ms **vóór** de playhead gezet als compensatie
+- **Te vroeg** → verlaag de waarde
+- **Te laat** → verhoog de waarde
+
+#### Kalibratie-test
+1. Klik **"🔔 Start kalibratie-test"**
+2. Er worden 8 clicks (om de 1.5s) afgespeeld met een **visuele flits** in het setup-venster
+3. De flits is exact op tijd, de click hoor je later door de audiobuffers
+4. Pas de latency aan tot het flits-ritme en click-ritme synchroon lopen
+5. Tip: begin bij 0 ms en werk omhoog tot je de vertraging ziet
+
+### 7.2 Beat Audit — Kliktrack
+
+Schakel de kliktrack in om te horen waar de beat-markers vallen. De click wordt
+sample-accuraat in de audio gemixed (geen sync-problemen).
+
+| Optie | Omschrijving |
+|-------|-------------|
+| **Beat audit aan** | Checkbox: hoorbare clicks op markers |
+| **Clicks op: Auto-BPM beats** | Clicks op SoundTouch BPM-detectie resultaten |
+| **Clicks op: Handmatige markers** | Clicks op eigen S/M/B markers |
+| **"🔄 Ververs click-posities"** | Herlaad de click-posities na wijzigingen |
+
+### 7.3 BPM Detectie
+
+#### Detectie-drempel (strength)
+- **Slider**: 0.0–1.0 (stap 0.05)
+- **Default**: 0.3
+- Hoe hoger, hoe strenger — alleen sterke beats worden marker
+- Klik **"🔄 Herplaats BPM beats"** om de drempel + offset toe te passen
+
+#### Beat offset-correctie
+- **Slider**: −50…+50 ms (stap 1 ms)
+- Alleen voor auto-BPM markers (SoundTouch)
+- Positief = beats later, negatief = beats vroeger
+
+### 7.4 Snelacties
+
+| Actie | Omschrijving |
+|-------|-------------|
+| **"🔄 Start auto-detectie"** | Voer chroma + BPM + beat-detectie uit (zelfde als 🔍 Detecteer) |
+| **"🗑 Wis alle markers"** | Verwijder alle markers in één keer |
+| **Schuif markers** | Schuif alle markers met X ms (bulk shift, −200…+200 ms) |
+
+De bulk shift is handig als alle markers structureel te vroeg of te laat blijken
+(bijv. door een vaste offset in de audiokaart).
+
+---
+
+## 8. Export
 
 ### Exportvenster openen
-- **Knop**: Klik "📤 Export" in de toolbar (alleen zichtbaar als de track loops heeft)
+- **Knop**: Klik "📤 Export" in de toolbar (alleen actief als de track loops heeft)
 - **Shortcut**: `Ctrl+E`
 
 ### Loops selecteren
@@ -232,7 +297,7 @@ Analyseer de A-B selectie op toonhoogtes:
 
 ---
 
-## 8. Arranger
+## 9. Arranger
 
 De arranger laat je loops in een **sequentie** afspelen.
 
@@ -264,7 +329,7 @@ Dit speelt: loop `a` 2×, loop `b` 1×, loop `c` 3×.
 
 ---
 
-## 9. Shortcuts
+## 10. Shortcuts
 
 ### Overzicht
 Druk op `F1` voor een volledig overzicht van alle sneltoetsen, gegroepeerd per categorie.
@@ -349,7 +414,7 @@ Als je een toets probeert te koppelen die al in gebruik is, wordt een waarschuwi
 
 ---
 
-## 10. Loop Bibliotheek
+## 11. Loop Bibliotheek
 
 ### Alle Tracks venster
 Open met de "📚 Alle Tracks" knop. Hier zie je al je geladen tracks en hun opgeslagen loops.
@@ -365,7 +430,7 @@ Alle loops worden opgeslagen in `library.json`. Dit bestand kun je delen tussen 
 
 ---
 
-## 11. Tips & Tricks
+## 12. Tips & Tricks
 
 ### Workflow: markers → loops
 1. Zet markers op belangrijke posities (S voor secties, M voor maten, B voor beats).
@@ -390,7 +455,71 @@ De editor onthoudt je laatste bestand, positie, zoom, loop-instellingen en pitch
 
 ---
 
-## 12. Toetsenreferentie (snelzoekkaart)
+## 13. Toolbar aanpassen
+
+De actie-werkbalk (onder de bestandstoolbar) is **volledig aanpasbaar**: je kiest zelf welke knoppen verschijnen en in welke volgorde.
+
+### Openen
+Klik op de **⋮** (kebab-knop) rechts in de toolbar om het venster "Toolbar aanpassen" te openen.
+
+### Knoppen ordenen
+- **▲ / ▼** pijltjes: verplaats een knop omhoog/omlaag
+- **✖**: verwijder een knop uit de toolbar
+- Klik op een actie onder **"Beschikbare acties"** om deze toe te voegen
+
+### Voorinstellingen
+- **"Standaard instellen"**: reset naar de oorspronkelijke set knoppen
+- **"Alles wissen"**: maak de toolbar helemaal leeg
+
+### Context-afhankelijkheid
+Knoppen worden **automatisch uitgeschakeld** (grijs) als de actie niet van toepassing is:
+
+| Actie | Actief wanneer |
+|-------|---------------|
+| 🔍 Detecteer | Een A-B selectie is actief |
+| ↗ Verleng beats | ≥ 2 beat markers aanwezig |
+| ✕ Wis loop | Een A-B selectie is actief |
+| ↩ Undo | Er is een undo-stap beschikbaar |
+| ↪ Redo | Er is een redo-stap beschikbaar |
+| 💾 Save Loop | Een A-B selectie + bestand is geladen |
+| 🎯 Center Loop | Een bestand is geladen |
+| 🔍− / 🔍+ / ⟲ Reset | Een bestand is geladen |
+| 📌 Beats / ⬆⬇ Pitch / 🔄↑↓ Tempo | Een bestand is geladen |
+| 📤 Export | Library heeft loops voor deze track |
+| ARR / ⚙ Setup / 🔇 Audit | Altijd beschikbaar |
+
+### Sneltoets in hover
+Beweeg over een knop om de **huidige sneltoets** te zien (bv. "Ongedaan maken (Ctrl+Z)"). De tekst past zich aan als je shortcuts wijzigt in de shortcut-editor.
+
+### Persistentie
+Je toolbar-configuratie wordt opgeslagen in `session.json` en is dus na een herstart behouden.
+
+### Alle beschikbare acties
+| Actie | Icoon | Omschrijving |
+|-------|-------|-------------|
+| 🔍 Detecteer | `🔍` | Analyseer A-B selectie op toonhoogtes en BPM |
+| ↗ Verleng beats | `↗` | Verspreid beat markers over de hele audio |
+| ✕ Wis loop | `✕` | Verwijder A-B selectie |
+| ↩ Undo | `↩` | Ongedaan maken |
+| ↪ Redo | `↪` | Opnieuw doen |
+| 💾 Save Loop | `💾` | Bewaar huidige loop in bibliotheek |
+| 🎯 Center Loop | `🎯` | Centreer weergave op de A-B loop |
+| 🔍− Zoom − | `🔍−` | Uitzoomen |
+| 🔍+ Zoom + | `🔍+` | Inzoomen |
+| ⟲ Reset zoom | `⟲` | Reset zoom en scroll |
+| 📌 Beats | `📌` | Plaats/verwijder beat marker bij playhead |
+| ARR | `ARR` | Open/sluit de arranger view |
+| 📤 Export | `📤` | Exporteer loops naar WAV |
+| ⚙ Setup | `⚙` | Open setup-venster |
+| 🔇 Audit | `🔇` | Schakel beat-audit kliktrack aan/uit |
+| 🔄↑ Tempo +10% | `🔄↑` | Verhoog afspeelsnelheid met 10% |
+| 🔄↓ Tempo −10% | `🔄↓` | Verlaag afspeelsnelheid met 10% |
+| ⬆ Pitch +1 | `⬆` | Verhoog toonhoogte met 1 semitone |
+| ⬇ Pitch −1 | `⬇` | Verlaag toonhoogte met 1 semitone |
+
+---
+
+## 14. Toetsenreferentie (snelzoekkaart)
 
 ```
 PLAYBACK
@@ -446,4 +575,4 @@ Ctrl+Shift+Z   Redo
 
 ---
 
-*Laatst bijgewerkt: juli 2026*
+*Laatst bijgewerkt: juli 2026 (toolbar aanpasbaar, tempo/pitch knoppen, setup & latency)*
