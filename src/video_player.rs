@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-/// Windows named pipe: backslash-dot-backslash-pipe-backslash-naam
-const MPV_PIPE: &str = r"\.\pipe\mpv-loopmachine";
+/// Windows named pipe: \\.\pipe\naam
+const MPV_PIPE: &str = r"\\.\pipe\mpv-loopmachine";
 
 pub struct VideoPlayer {
     process: Option<Child>,
@@ -33,6 +33,7 @@ impl VideoPlayer {
 
         let process = Command::new(&self.mpv_path)
             .args(&[
+                "--no-terminal",
                 "--pause",
                 "--volume=0",
                 &format!("--input-ipc-server={}", MPV_PIPE),
@@ -45,7 +46,7 @@ impl VideoPlayer {
         self.process = Some(process);
 
         // Wacht tot mpv de pipe heeft aangemaakt
-        std::thread::sleep(Duration::from_millis(1000));
+        std::thread::sleep(Duration::from_millis(1500));
 
         // Maak permanente pipe-connectie
         #[cfg(target_os = "windows")]
