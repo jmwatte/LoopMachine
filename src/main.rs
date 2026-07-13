@@ -12,12 +12,24 @@ mod waveform;
 mod waveform_player;
 
 fn main() -> Result<(), eframe::Error> {
-    // ── Logger initialisatie (zie RUST_LOG omgevingsvariabele) ──
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
-        .format_timestamp_millis()
-        .init();
+    // ── Logger: schrijf naar bestand (console is onzichtbaar met windows_subsystem) ──
+    let log_path = crate::session::data_dir().join("loopmachine.log");
+    let _ = std::fs::remove_file(&log_path);
+    if let Ok(log_file) = std::fs::File::create(&log_path) {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+            .format_timestamp_millis()
+            .target(env_logger::Target::Pipe(Box::new(log_file)))
+            .init();
+    } else {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+            .format_timestamp_millis()
+            .init();
+    }
 
-    log::info!("LoopMachine gestart");
+    log::info!("LoopMachine gestart — logbestand: {}", log_path.display());
+
+    // Migreer data van oude locatie (working directory) naar %APPDATA%/LoopMachine/
+    crate::loops::migrate_if_needed();
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -33,8 +45,6 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             // ── Font setup ──
-            // DejaVu Sans Mono heeft uitstekende Unicode-dekking (pijlen, symbolen, etc.)
-            // We gebruiken het als primair monospace font + als fallback voor proportional.
             let mut fonts = eframe::egui::FontDefinitions::default();
 
             fonts.font_data.insert(
@@ -44,12 +54,10 @@ fn main() -> Result<(), eframe::Error> {
                 )),
             );
 
-            // Monospace: DejaVu bovenaan (voorrang boven Hack)
             if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {
                 monospace.insert(0, "DejaVuSansMono".to_string());
             }
 
-            // Proportional: DejaVu achteraan (laatste fallback voor missende tekens)
             if let Some(proportional) = fonts
                 .families
                 .get_mut(&eframe::egui::FontFamily::Proportional)

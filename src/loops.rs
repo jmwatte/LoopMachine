@@ -126,6 +126,56 @@ fn old_loops_path() -> std::path::PathBuf {
     crate::session::data_dir().join("loops.json")
 }
 
+/// Migreer data van oude locaties naar %APPDATA%/LoopMachine/
+pub fn migrate_if_needed() {
+    use std::path::Path;
+    let data_dir = crate::session::data_dir();
+    let old_files = [
+        "library.json",
+        "loops.json",
+        "arrangements.json",
+        "shortcuts.json",
+        "session.json",
+    ];
+
+    // Check meerdere oude locaties, in volgorde van prioriteit:
+    // 1. target/release/ (naast executable bij --release)
+    // 2. target/debug/ (naast executable bij debug)
+    // 3. Huidige working directory (project root)
+    let search_dirs = ["target/release", "target/debug", "."];
+
+    for file in &old_files {
+        let new_path = data_dir.join(file);
+        let mut found = false;
+
+        for dir in &search_dirs {
+            let old_path = Path::new(dir).join(file);
+            if old_path.exists() {
+                if *file == "session.json" || !new_path.exists() {
+                    log::info!(
+                        "Migreer '{}' naar '{}'",
+                        old_path.display(),
+                        new_path.display()
+                    );
+                    if let Err(e) = std::fs::copy(&old_path, &new_path) {
+                        log::warn!("Kon '{}' niet migreren: {}", file, e);
+                    } else {
+                        found = true;
+                        break; // Eerste gevonden = beste
+                    }
+                }
+            }
+        }
+
+        if !found && *file == "session.json" {
+            log::warn!(
+                "Geen oude '{}' gevonden in target/release, target/debug of .",
+                file
+            );
+        }
+    }
+}
+
 /// Laad de bibliotheek van schijf. Migreert oude loops.json indien nodig.
 /// Wist kort nadien bestaande loops zonder short_id een ID toe.
 pub fn load_library() -> Library {

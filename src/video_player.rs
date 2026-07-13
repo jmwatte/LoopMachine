@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
 
 const MPV_PIPE: &str = r"\\.\pipe\mpv-loopmachine";
@@ -7,7 +8,8 @@ const MPV_PIPE: &str = r"\\.\pipe\mpv-loopmachine";
 pub struct VideoPlayer {
     process: Option<Child>,
     mpv_path: String,
-    is_open: bool,
+    /// Permanente pipe-connectie — eenmaal open, blijft open voor alle commands.
+    pipe: Mutex<Option<std::fs::File>>,
 }
 
 impl VideoPlayer {
@@ -15,18 +17,18 @@ impl VideoPlayer {
         Self {
             process: None,
             mpv_path: mpv_path.to_string(),
-            is_open: false,
+            pipe: Mutex::new(None),
         }
     }
 
-    /// Open video in mpv — start gepauzeerd, mute audio (wij luisteren via LoopMachine).
+    /// Open video in mpv en maak permanente pipe-connectie.
     pub fn open(&mut self, video_path: &str) -> Result<(), String> {
         self.close();
         let process = Command::new(&self.mpv_path)
             .args(&[
                 "--no-terminal",
-                "--pause",    // start gepauzeerd — wij bepalen wanneer het gaat spelen
-                "--volume=0", // audio uit — wij luisteren via LoopMachine
+                "--pause",
+                "--volume=0",
                 &format!("--input-ipc-server={}", MPV_PIPE),
                 video_path,
             ])
@@ -35,79 +37,70 @@ impl VideoPlayer {
             .spawn()
             .map_err(|e| format!("Kan mpv niet starten: {}", e))?;
         self.process = Some(process);
-        self.is_open = true;
 
-        // Wacht tot de named pipe beschikbaar is (mpv maakt hem aan bij start)
-        let max_retries = 50;
-        for attempt in 0..max_retries {
-            #[cfg(target_os = "windows")]
-            {
-                use std::fs::OpenOptions;
-                if OpenOptions::new().write(true).open(MPV_PIPE).is_ok() {
-                    return Ok(());
-                }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                use std::os::unix::net::UnixStream;
-                if UnixStream::connect(MPV_PIPE).is_ok() {
-                    return Ok(());
-                }
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        // Pipe na 1 seconde nog niet beschikbaar → geef wel ok, sync faalt dan stil
-        log::warn!("mpv pipe niet beschikbaar na 1s, ga door zonder sync");
-        Ok(())
-    }
+        // Wacht tot mpv de pipe heeft aangemaakt
+        std::thread::sleep(Duration::from_millis(500));
 
-    /// Stuur JSON-commando naar mpv via named pipe
-    fn send_command(&self, cmd: &str) -> Result<(), String> {
-        if !self.is_open {
-            return Err("mpv niet geopend".to_string());
-        }
+        // Maak permanente connectie
         #[cfg(target_os = "windows")]
         {
             use std::fs::OpenOptions;
-            let mut pipe = OpenOptions::new()
+            let pipe = OpenOptions::new()
+                .read(true)
                 .write(true)
                 .open(MPV_PIPE)
-                .map_err(|e| format!("Kan pipe niet openen (mpv misschien gesloten?): {}", e))?;
-            pipe.write_all(cmd.as_bytes())
-                .map_err(|e| format!("Kan niet schrijven naar pipe: {}", e))?;
+                .map_err(|e| format!("Pipe error bij openen: {}", e))?;
+            *self.pipe.lock().unwrap() = Some(pipe);
+            log::info!("mpv pipe geopend (permanent)");
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            use std::os::unix::net::UnixStream;
-            let mut stream = UnixStream::connect(MPV_PIPE)
-                .map_err(|e| format!("Kan socket niet openen (mpv misschien gesloten?): {}", e))?;
-            stream
-                .write_all(cmd.as_bytes())
-                .map_err(|e| format!("Kan niet schrijven naar socket: {}", e))?;
-        }
+
         Ok(())
     }
 
+    /// Stuur JSON-commando via de permanente pipe-connectie.
+    fn send_command(&self, cmd: &str) -> Result<(), String> {
+        let mut guard = self
+            .pipe
+            .lock()
+            .map_err(|e| format!("Mutex error: {}", e))?;
+        if let Some(ref mut pipe) = *guard {
+            pipe.write_all(cmd.as_bytes())
+                .map_err(|e| format!("Write error: {}", e))?;
+            pipe.flush().ok();
+            Ok(())
+        } else {
+            Err("Pipe niet geopend".to_string())
+        }
+    }
+
     pub fn seek(&self, pos_secs: f32) {
-        let _ = self.send_command(&format!(
+        if let Err(e) = self.send_command(&format!(
             r#"{{ "command": ["set_property", "time-pos", {}] }}"#,
             pos_secs
-        ));
+        )) {
+            log::warn!("seek: {}", e);
+        }
     }
 
     pub fn pause(&self) {
-        let _ = self.send_command(r#"{ "command": ["set_property", "pause", true] }"#);
+        if let Err(e) = self.send_command(r#"{ "command": ["set_property", "pause", true] }"#) {
+            log::warn!("pause: {}", e);
+        }
     }
 
     pub fn resume(&self) {
-        let _ = self.send_command(r#"{ "command": ["set_property", "pause", false] }"#);
+        if let Err(e) = self.send_command(r#"{ "command": ["set_property", "pause", false] }"#) {
+            log::warn!("resume: {}", e);
+        }
     }
 
     pub fn set_speed(&self, speed: f32) {
-        let _ = self.send_command(&format!(
+        if let Err(e) = self.send_command(&format!(
             r#"{{ "command": ["set_property", "speed", {}] }}"#,
             speed
-        ));
+        )) {
+            log::warn!("speed: {}", e);
+        }
     }
 
     pub fn set_loop_a(&self, secs: f32) {
@@ -128,13 +121,11 @@ impl VideoPlayer {
         let _ = self.send_command(r#"{ "command": ["set_property", "ab-loop-a", "no"] }"#);
     }
 
-    /// Forceer mpv om te stoppen — kill direct, geen wait.
-    /// Als de gebruiker mpv zelf heeft gesloten doet `kill()` niets (proces is al weg).
     pub fn close(&mut self) {
-        self.is_open = false;
+        *self.pipe.lock().unwrap() = None;
         if let Some(mut p) = self.process.take() {
-            let _ = p.kill(); // force kill, geen wait — geen hang meer
-            let _ = p.wait(); // wacht nog even zodat resources worden opgeruimd
+            let _ = p.kill();
+            let _ = p.wait();
         }
     }
 }
