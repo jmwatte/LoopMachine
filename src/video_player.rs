@@ -1,7 +1,6 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::thread;
 use std::time::Duration;
 
 // ✅ FIX 1: Exacte Windows Named Pipe syntax (let op de dubbele backslashes)
@@ -10,7 +9,7 @@ const MPV_PIPE: &str = r"\\.\pipe\mpv-loopmachine";
 pub struct VideoPlayer {
     process: Option<Child>,
     mpv_path: String,
-    /// Bevat nu ALLEEN de dedicated write-pipe om deadlocks te voorkomen
+    /// Één duplex pipe handle (read+write) — geen deadlock-risico.
     pipe: Mutex<Option<std::fs::File>>,
 }
 
@@ -60,29 +59,17 @@ impl VideoPlayer {
         {
             use std::fs::OpenOptions;
 
-            let write_pipe = OpenOptions::new()
+            // ÉÉN duplex pipe openen (read + write) i.p.v. twee aparte handles.
+            // Mpv's --input-ipc-server accepteert slechts 1 client-connectie,
+            // dus een tweede open zou mislukken (ERROR_PIPE_BUSY).
+            let pipe = OpenOptions::new()
+                .read(true)
                 .write(true)
                 .open(MPV_PIPE)
-                .map_err(|e| format!("Pipe write error: {}", e))?;
+                .map_err(|e| format!("Pipe open error: {}", e))?;
 
-            let read_pipe = OpenOptions::new()
-                .read(true)
-                .open(MPV_PIPE)
-                .map_err(|e| format!("Pipe read error: {}", e))?;
-
-            thread::spawn(move || {
-                let reader = BufReader::new(read_pipe);
-                for line in reader.lines() {
-                    match line {
-                        Ok(text) => log::debug!("mpv ipc: {}", text),
-                        Err(_) => break,
-                    }
-                }
-                log::debug!("mpv reader gestopt");
-            });
-
-            *self.pipe.lock().unwrap() = Some(write_pipe);
-            log::info!("mpv pipe geopend (gesplitst read/write)");
+            *self.pipe.lock().unwrap() = Some(pipe);
+            log::info!("mpv pipe geopend (duplex)");
         }
         Ok(())
     }
@@ -96,8 +83,6 @@ impl VideoPlayer {
             // Newline is VERPLICHT voor mpv IPC
             let cmd_with_newline = format!("{}\n", cmd);
 
-            // Omdat dit nu een dedicated write-handle is, zal dit NOOIT meer
-            // blokkeren op de lees-actie van de achtergrond-thread.
             pipe.write_all(cmd_with_newline.as_bytes())
                 .map_err(|e| format!("Write error: {}", e))?;
             pipe.flush().ok();
