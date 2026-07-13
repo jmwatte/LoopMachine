@@ -435,7 +435,13 @@ impl LoopEditorApp {
             self.waveform_has_content = false;
         }
 
-        let result = if self.is_video_file() {
+        let is_video = matches!(
+            std::path::Path::new(path)
+                .extension()
+                .and_then(|s| s.to_str()),
+            Some("mp4" | "mov" | "avi" | "mkv" | "webm")
+        );
+        let result = if is_video {
             if let Some(ref ffmpeg) = self.ffmpeg_path {
                 crate::waveform::decode_video_audio(path, ffmpeg, self.waveform_state.channel_mode)
             } else {
