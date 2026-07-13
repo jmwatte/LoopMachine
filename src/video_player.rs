@@ -35,8 +35,8 @@ impl VideoPlayer {
         let mpv_native_log = crate::session::data_dir().join("mpv_native_log.txt");
         log::info!("📝 mpv's interne logbestand: {:?}", mpv_native_log);
 
-        let process = Command::new(&self.mpv_path)
-            .current_dir(mpv_dir) // ✅ FIX 1: Zet de werkmap op de mpv-map, zodat DLL's/codecs gevonden worden
+        let mut cmd = Command::new(&self.mpv_path);
+        cmd.current_dir(mpv_dir) // ✅ FIX 1: Zet de werkmap op de mpv-map, zodat DLL's/codecs gevonden worden
             .args(&[
                 "--no-terminal",
                 "--keep-open=yes",
@@ -48,7 +48,17 @@ impl VideoPlayer {
                 video_path,
             ])
             .stdout(Stdio::null())
-            .stderr(Stdio::null()) // We hoeven stderr niet meer te vangen, --log-file doet het beter
+            .stderr(Stdio::null()); // We hoeven stderr niet meer te vangen, --log-file doet het beter
+
+        // Onderdruk terminalvenster op Windows
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let process = cmd
             .spawn()
             .map_err(|e| format!("Kan mpv niet starten: {}", e))?;
 

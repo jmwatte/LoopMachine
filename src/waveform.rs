@@ -401,7 +401,7 @@ pub fn decode_audio(
 pub fn decode_video_audio(
     path: &str,
     ffmpeg_path: &str,
-    mode: ChannelMode,
+    _mode: ChannelMode,
 ) -> Result<(Vec<f32>, u32, f32, Option<String>), String> {
     use std::io::Read;
     use std::process::Command;
@@ -409,30 +409,38 @@ pub fn decode_video_audio(
     log::info!("Extraheer audio uit video via ffmpeg: {}", path);
 
     // ffmpeg: decodeer naar raw f32le mono, 44100 Hz, via stdout
-    let mut child = Command::new(ffmpeg_path)
-        .args(&[
-            "-i",
-            path,
-            "-f",
-            "f32le", // raw f32 output
-            "-ac",
-            "1", // mono
-            "-ar",
-            "44100", // 44.1 kHz
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-", // stdout
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "Kan ffmpeg niet starten: {}. Download van https://ffmpeg.org",
-                e
-            )
-        })?;
+    let mut cmd = Command::new(ffmpeg_path);
+    cmd.args(&[
+        "-i",
+        path,
+        "-f",
+        "f32le", // raw f32 output
+        "-ac",
+        "1", // mono
+        "-ar",
+        "44100", // 44.1 kHz
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-", // stdout
+    ])
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+
+    // Onderdruk terminalvenster op Windows
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "Kan ffmpeg niet starten: {}. Download van https://ffmpeg.org",
+            e
+        )
+    })?;
 
     let mut stdout = child.stdout.take().ok_or("Geen output van ffmpeg")?;
     let mut raw_bytes: Vec<u8> = Vec::new();
