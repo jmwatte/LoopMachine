@@ -7,6 +7,7 @@ mod loops;
 mod session;
 mod shortcuts;
 mod timestretch;
+pub mod video_player;
 mod waveform;
 mod waveform_player;
 

@@ -34,6 +34,12 @@ pub struct SessionState {
     /// User-definable toolbar knoppen.
     #[serde(default)]
     pub toolbar_buttons: Option<Vec<ToolbarAction>>,
+    /// Pad naar ffmpeg executable (optioneel, voor video).
+    #[serde(default)]
+    pub ffmpeg_path: Option<String>,
+    /// Pad naar mpv executable (optioneel, voor video).
+    #[serde(default)]
+    pub mpv_path: Option<String>,
 }
 
 impl SessionState {
@@ -54,6 +60,8 @@ impl SessionState {
         playback_latency_ms: f32,
         beat_offset_ms: f32,
         toolbar_buttons: &[ToolbarAction],
+        ffmpeg_path: Option<&str>,
+        mpv_path: Option<&str>,
     ) {
         let state = SessionState {
             file_path: file_path.map(|s| s.to_string()),
@@ -72,6 +80,8 @@ impl SessionState {
             playback_latency_ms,
             beat_offset_ms,
             toolbar_buttons: Some(toolbar_buttons.to_vec()),
+            ffmpeg_path: ffmpeg_path.map(|s| s.to_string()),
+            mpv_path: mpv_path.map(|s| s.to_string()),
         };
         match serde_json::to_string_pretty(&state) {
             Ok(json) => {
@@ -120,6 +130,8 @@ mod tests {
             playback_latency_ms: 40.0,
             beat_offset_ms: 0.0,
             toolbar_buttons: None,
+            ffmpeg_path: None,
+            mpv_path: None,
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();
@@ -141,6 +153,8 @@ mod tests {
         assert_eq!(state.playback_latency_ms, restored.playback_latency_ms);
         assert_eq!(state.beat_offset_ms, restored.beat_offset_ms);
         assert_eq!(state.toolbar_buttons, restored.toolbar_buttons);
+        assert_eq!(state.ffmpeg_path, restored.ffmpeg_path);
+        assert_eq!(state.mpv_path, restored.mpv_path);
     }
 
     #[test]
@@ -166,6 +180,8 @@ mod tests {
         assert_eq!(state.playback_latency_ms, 0.0);
         assert_eq!(state.beat_offset_ms, 0.0);
         assert_eq!(state.toolbar_buttons, None);
+        assert_eq!(state.ffmpeg_path, None);
+        assert_eq!(state.mpv_path, None);
     }
 
     #[test]
@@ -191,6 +207,8 @@ mod tests {
                 ToolbarAction::Undo,
                 ToolbarAction::SaveLoop,
             ]),
+            ffmpeg_path: None,
+            mpv_path: None,
         };
 
         let json = serde_json::to_string(&state).unwrap();
@@ -228,6 +246,8 @@ mod tests {
             playback_latency_ms: 0.0,
             beat_offset_ms: 0.0,
             toolbar_buttons: None,
+            ffmpeg_path: None,
+            mpv_path: None,
         };
 
         let json = serde_json::to_string(&state).unwrap();

@@ -13,6 +13,7 @@ use crate::chroma::{
 use crate::loops::{Library, SavedLoop};
 use crate::session::SessionState;
 use crate::shortcuts::{ShortcutAction, ShortcutsConfig, ToolbarAction};
+use crate::video_player::VideoPlayer;
 use crate::waveform::{render_waveform, ChannelMode, WaveformState};
 use crate::waveform_player::{start_waveform_thread, WaveformCommand, WaveformEvent};
 use crossbeam_channel::{Receiver, Sender};
@@ -130,6 +131,14 @@ pub struct LoopEditorApp {
     pub toolbar_buttons: Vec<ToolbarAction>,
     /// Toon het toolbar-editor venster
     pub show_toolbar_editor: bool,
+
+    // ── Video (ffmpeg/mpv) ──
+    /// Pad naar ffmpeg executable.
+    pub ffmpeg_path: Option<String>,
+    /// Pad naar mpv executable.
+    pub mpv_path: Option<String>,
+    /// Optionele video-player (mpv) voor video-bestanden.
+    pub video_player: Option<crate::video_player::VideoPlayer>,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -218,15 +227,28 @@ impl LoopEditorApp {
             last_panel_width: 800.0,
             file_dialog: FileDialog::new()
                 .add_file_filter(
-                    "Audio",
+                    "Audio / Video",
                     std::sync::Arc::new(|p: &std::path::Path| {
                         matches!(
                             p.extension().and_then(|s| s.to_str()),
-                            Some("mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma")
+                            Some(
+                                "mp3"
+                                    | "wav"
+                                    | "flac"
+                                    | "ogg"
+                                    | "m4a"
+                                    | "aac"
+                                    | "wma"
+                                    | "mp4"
+                                    | "mov"
+                                    | "avi"
+                                    | "mkv"
+                                    | "webm"
+                            )
                         )
                     }),
                 )
-                .default_file_filter("Audio"),
+                .default_file_filter("Audio / Video"),
             file_dialog_last_dir: None,
             show_arranger: false,
             active_arrangement: None,
@@ -266,6 +288,9 @@ impl LoopEditorApp {
             bulk_shift_ms: 0,
             toolbar_buttons: ToolbarAction::default_toolbar(),
             show_toolbar_editor: false,
+            ffmpeg_path: None,
+            mpv_path: None,
+            video_player: None,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -292,6 +317,9 @@ impl LoopEditorApp {
             app.bpm_threshold = session.bpm_threshold;
             app.playback_latency_ms = session.playback_latency_ms;
             app.beat_offset_ms = session.beat_offset_ms;
+            // Herstel video-paden uit sessie
+            app.ffmpeg_path = session.ffmpeg_path.clone();
+            app.mpv_path = session.mpv_path.clone();
             // Herstel toolbar buttons uit sessie
             if let Some(ref buttons) = session.toolbar_buttons {
                 if !buttons.is_empty() {
@@ -308,6 +336,49 @@ impl LoopEditorApp {
         }
 
         app
+    }
+
+    /// Check of het geladen bestand een video is (op basis van extensie).
+    pub fn is_video_file(&self) -> bool {
+        self.waveform_state.path.as_deref().map_or(false, |p| {
+            matches!(
+                std::path::Path::new(p).extension().and_then(|s| s.to_str()),
+                Some("mp4" | "mov" | "avi" | "mkv" | "webm")
+            )
+        })
+    }
+
+    /// Open video in mpv (als het een video-bestand is en mpv geconfigureerd is).
+    pub fn open_video(&mut self) {
+        if let (Some(ref path), Some(ref mpv_path)) =
+            (self.waveform_state.path.clone(), self.mpv_path.clone())
+        {
+            if self.is_video_file() {
+                let mut player = VideoPlayer::new(mpv_path);
+                match player.open(path) {
+                    Ok(()) => {
+                        self.video_player = Some(player);
+                        self.status_message = "🎬 Video-speler geopend".to_string();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("mpv fout: {}", e);
+                    }
+                }
+                self.status_message_timer = 4 * 60;
+            }
+        }
+    }
+
+    /// Sync mpv met huidige play-state (positie, play/pause).
+    pub fn sync_video(&self) {
+        if let Some(ref player) = self.video_player {
+            if self.waveform_is_playing {
+                player.resume();
+            } else {
+                player.pause();
+            }
+            player.seek(self.waveform_play_position);
+        }
     }
 
     pub fn load_file(&mut self, path: &str) {
@@ -765,6 +836,8 @@ impl LoopEditorApp {
             self.playback_latency_ms,
             self.beat_offset_ms,
             &self.toolbar_buttons,
+            self.ffmpeg_path.as_deref(),
+            self.mpv_path.as_deref(),
         );
     }
 

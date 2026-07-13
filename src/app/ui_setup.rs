@@ -347,7 +347,34 @@ impl LoopEditorApp {
                         }
                     });
 
-                        ui.add_space(8.0);
+                    // ── Video (ffmpeg/mpv) ──
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Video-ondersteuning").size(13.0).strong()
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("ffmpeg:");
+                        let mut ff_path = self.ffmpeg_path.clone().unwrap_or_default();
+                        if ui.text_edit_singleline(&mut ff_path).changed() {
+                            self.ffmpeg_path = if ff_path.is_empty() { None } else { Some(ff_path) };
+                            self.save_session();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("mpv:");
+                        let mut mpv_path = self.mpv_path.clone().unwrap_or_default();
+                        if ui.text_edit_singleline(&mut mpv_path).changed() {
+                            self.mpv_path = if mpv_path.is_empty() { None } else { Some(mpv_path) };
+                            self.save_session();
+                        }
+                    });
+                    ui.label(
+                        RichText::new("Laat leeg om alleen audio te gebruiken.\nBijv: C:\\Tools\\ffmpeg.exe")
+                            .size(10.0)
+                            .color(Color32::GRAY),
+                    );
+
+                    ui.add_space(8.0);
 
                     // ── Status ──
                     if !self.status_message.is_empty() {

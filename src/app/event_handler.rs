@@ -17,19 +17,23 @@ impl LoopEditorApp {
                 WaveformEvent::Playing => {
                     self.waveform_is_playing = true;
                     self.waveform_has_content = true;
+                    self.sync_video();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Stopped => {
                     self.waveform_is_playing = false;
                     self.waveform_has_content = false;
+                    self.sync_video();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Paused => {
                     self.waveform_is_playing = false;
+                    self.sync_video();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Resumed => {
                     self.waveform_is_playing = true;
+                    self.sync_video();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Error(msg) => {
@@ -57,6 +61,10 @@ impl LoopEditorApp {
                         && !self.waveform_state.dragging_playhead
                     {
                         self.waveform_play_position = pos;
+                        // Sync video positie (alleen als seek voltooid is)
+                        if self.video_player.is_some() {
+                            self.sync_video();
+                        }
                     }
 
                     // Loop-herhaal detectie: als de positie van B terugspringt

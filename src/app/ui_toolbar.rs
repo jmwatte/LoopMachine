@@ -506,6 +506,29 @@ impl LoopEditorApp {
                     self.toolbar_button(ui, *action);
                 }
 
+                // ── Video-knop (alleen bij video-bestanden) ──
+                if self.is_video_file() && self.mpv_path.is_some() {
+                    let has_video = self.video_player.is_some();
+                    let btn_label = if has_video { "🎬" } else { "🎬 Toon video" };
+                    if ui
+                        .button(btn_label)
+                        .on_hover_text(if has_video {
+                            "Video-speler sluiten"
+                        } else {
+                            "Open video in mpv (synced met audio)"
+                        })
+                        .clicked()
+                    {
+                        if has_video {
+                            self.video_player = None;
+                            self.status_message = "Video-speler gesloten".to_string();
+                        } else {
+                            self.open_video();
+                        }
+                        self.status_message_timer = 3 * 60;
+                    }
+                }
+
                 // Wis markers (dropdown) — staat altijd rechts van de toolbar
                 let has_markers = !self.waveform_state.markers.is_empty();
                 if has_markers {
