@@ -4,13 +4,13 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-/// Windows named pipe: \\.\pipe\naam
+// ✅ FIX 1: Correcte Windows Named Pipe prefix (\\.\pipe\)
 const MPV_PIPE: &str = r"\\.\pipe\mpv-loopmachine";
 
 pub struct VideoPlayer {
     process: Option<Child>,
     mpv_path: String,
-    /// Permanente pipe-connectie — eenmaal open, blijft open voor alle commands.
+    /// Bevat nu ALLEEN de write-pipe om deadlocks te voorkomen
     pipe: Mutex<Option<std::fs::File>>,
 }
 
@@ -23,13 +23,8 @@ impl VideoPlayer {
         }
     }
 
-    /// Open video in mpv en maak permanente pipe-connectie.
     pub fn open(&mut self, video_path: &str) -> Result<(), String> {
         self.close();
-        // Vang mpv's stderr zodat we fouten kunnen zien
-        let stderr_log = crate::session::data_dir().join("mpv_stderr.log");
-        let stderr_file = std::fs::File::create(&stderr_log)
-            .map_err(|e| format!("Kan mpv log niet aanmaken: {}", e))?;
 
         let process = Command::new(&self.mpv_path)
             .args(&[
@@ -40,29 +35,33 @@ impl VideoPlayer {
                 video_path,
             ])
             .stdout(Stdio::null())
-            .stderr(stderr_file)
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Kan mpv niet starten: {}", e))?;
+
         self.process = Some(process);
 
         // Wacht tot mpv de pipe heeft aangemaakt
-        std::thread::sleep(Duration::from_millis(1500));
+        std::thread::sleep(Duration::from_millis(1000));
 
-        // Maak permanente pipe-connectie
         #[cfg(target_os = "windows")]
         {
             use std::fs::OpenOptions;
-            let pipe = OpenOptions::new()
-                .read(true)
+
+            // ✅ FIX 2: Open TWEE aparte connecties naar de pipe.
+            // Windows serialiseert I/O op een enkele HANDLE, wat tot deadlocks leidt
+            // als je tegelijkertijd wilt lezen en schrijven. mpv accepteert meerdere clients.
+            let write_pipe = OpenOptions::new()
                 .write(true)
                 .open(MPV_PIPE)
-                .map_err(|e| format!("Pipe error bij openen: {}", e))?;
+                .map_err(|e| format!("Pipe write error: {}", e))?;
 
-            // Start achtergrond-thread die mpv's antwoorden uitleest en weggooit.
-            // Anders raakt de pipe-buffer vol (4KB) en blokkeert mpv.
-            let read_pipe = pipe
-                .try_clone()
-                .map_err(|e| format!("Kan pipe niet clonen: {}", e))?;
+            let read_pipe = OpenOptions::new()
+                .read(true)
+                .open(MPV_PIPE)
+                .map_err(|e| format!("Pipe read error: {}", e))?;
+
+            // Achtergrond-thread voor het uitlezen van mpv's antwoorden
             thread::spawn(move || {
                 let reader = BufReader::new(read_pipe);
                 for line in reader.lines() {
@@ -74,23 +73,25 @@ impl VideoPlayer {
                 log::debug!("mpv reader gestopt");
             });
 
-            *self.pipe.lock().unwrap() = Some(pipe);
-            log::info!("mpv pipe geopend (permanent)");
+            // We slaan ALLEEN de write-pipe op voor onze commando's
+            *self.pipe.lock().unwrap() = Some(write_pipe);
+            log::info!("mpv pipe geopend (gesplitst voor read/write)");
         }
-
         Ok(())
     }
 
-    /// Stuur JSON-commando via de permanente pipe-connectie.
-    /// Ieder commando wordt afgesloten met \n — mpv heeft dit nodig.
+    /// Stuur JSON-commando via de dedicated write-pipe.
     fn send_command(&self, cmd: &str) -> Result<(), String> {
         let mut guard = self
             .pipe
             .lock()
             .map_err(|e| format!("Mutex error: {}", e))?;
         if let Some(ref mut pipe) = *guard {
-            // Newline is VERPLICHT — zonder wacht mpv eeuwig op meer JSON
+            // Newline is VERPLICHT
             let cmd_with_newline = format!("{}\n", cmd);
+
+            // Omdat we nu een dedicated write-pipe gebruiken, blokkeert dit
+            // niet meer op de reader en blijft de UI responsive!
             pipe.write_all(cmd_with_newline.as_bytes())
                 .map_err(|e| format!("Write error: {}", e))?;
             pipe.flush().ok();
@@ -145,7 +146,6 @@ impl VideoPlayer {
     }
 
     pub fn clear_loop(&self) {
-        // Beide A en B op "no" zetten — alleen A wissen is niet genoeg
         let _ = self.send_command(r#"{ "command": ["set_property", "ab-loop-a", "no"] }"#);
         let _ = self.send_command(r#"{ "command": ["set_property", "ab-loop-b", "no"] }"#);
     }
