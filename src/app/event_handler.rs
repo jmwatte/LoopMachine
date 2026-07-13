@@ -63,9 +63,29 @@ impl LoopEditorApp {
                         && !self.waveform_state.dragging_playhead
                     {
                         self.waveform_play_position = pos;
+
                         // Sync video positie ALLEEN bij voltooide seek, niet bij elke frame
                         if seek_completed && self.video_player.is_some() {
                             self.sync_video_position();
+                        }
+
+                        // 🔁 Loop-wrap detectie: als de audio-thread de positie heeft
+                        // teruggewrapt (modulo), seek dan ook mpv naar de start van de loop.
+                        // Dit houdt de video gesynchroniseerd met audio bij elke wrap.
+                        if self.video_player.is_some() && pos < prev_pos && !seek_completed {
+                            if let (Some(a), Some(b)) = (
+                                self.waveform_state.loop_a_secs,
+                                self.waveform_state.loop_b_secs,
+                            ) {
+                                let loop_dur = b - a;
+                                if loop_dur > 0.0
+                                    && (prev_pos - pos).abs() > loop_dur * 0.3
+                                    && prev_pos >= b - loop_dur * 0.2
+                                {
+                                    log::debug!("loop-wrap: seek video naar {:.3}s", pos);
+                                    self.sync_video_position();
+                                }
+                            }
                         }
                     }
 
