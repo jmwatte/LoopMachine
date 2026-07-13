@@ -188,9 +188,10 @@ impl ToolbarAction {
 }
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 
-const SHORTCUTS_FILE: &str = "shortcuts.json";
+fn shortcuts_path() -> std::path::PathBuf {
+    crate::session::data_dir().join("shortcuts.json")
+}
 const CURRENT_VERSION: u32 = 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -942,7 +943,7 @@ impl Default for ShortcutsConfig {
 impl ShortcutsConfig {
     /// Laad config uit bestand, of gebruik defaults als het niet bestaat
     pub fn load() -> Self {
-        let path = Path::new(SHORTCUTS_FILE);
+        let path = shortcuts_path();
         if path.exists() {
             match fs::read_to_string(path) {
                 Ok(json) => match serde_json::from_str::<ShortcutsConfig>(&json) {
@@ -992,7 +993,7 @@ impl ShortcutsConfig {
     pub fn save(&self) -> Result<(), String> {
         match serde_json::to_string_pretty(self) {
             Ok(json) => {
-                fs::write(SHORTCUTS_FILE, json).map_err(|e| format!("Kon niet opslaan: {}", e))
+                fs::write(shortcuts_path(), json).map_err(|e| format!("Kon niet opslaan: {}", e))
             }
             Err(e) => Err(format!("Kon niet serialiseren: {}", e)),
         }

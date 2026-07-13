@@ -2,14 +2,36 @@ use crate::shortcuts::ToolbarAction;
 use log;
 use serde::{Deserialize, Serialize};
 
-/// Bepaal het pad naar session.json — naast de executable, niet in de working directory.
-fn session_path() -> std::path::PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            return dir.join("session.json");
+/// Bepaal de data-directory: %APPDATA%/LoopMachine (Windows) of ~/.local/share/loopmachine (overig).
+/// Alle data-bestanden worden hier opgeslagen, onafhankelijk van waar de executable staat.
+pub fn data_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let dir = std::path::PathBuf::from(appdata).join("LoopMachine");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
         }
     }
-    std::path::PathBuf::from("session.json")
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = std::path::PathBuf::from(home).join(".local/share/loopmachine");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir;
+        }
+    }
+    // Fallback: naast de executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.to_path_buf();
+        }
+    }
+    std::path::PathBuf::from(".")
+}
+
+fn session_path() -> std::path::PathBuf {
+    data_dir().join("session.json")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

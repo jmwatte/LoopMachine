@@ -239,13 +239,15 @@ pub struct SequenceStep {
 // Laden / Opslaan
 // ───────────────────────────────────────────────
 
-const ARRANGEMENTS_FILE: &str = "arrangements.json";
+fn arrangements_path() -> std::path::PathBuf {
+    crate::session::data_dir().join("arrangements.json")
+}
 
 /// Laad arrangementen van schijf.
 /// Kleurt alle stappen die nog de default grijze kleur
 /// hebben opnieuw in via de hash van track_path + loop_id.
 pub fn load_arrangements() -> Vec<Arrangement> {
-    if let Ok(json) = std::fs::read_to_string(ARRANGEMENTS_FILE) {
+    if let Ok(json) = std::fs::read_to_string(arrangements_path()) {
         if let Ok(mut arr) = serde_json::from_str::<Vec<Arrangement>>(&json) {
             fixup_colors(&mut arr);
             return arr;
@@ -269,10 +271,10 @@ fn fixup_colors(arrangements: &mut [Arrangement]) {
 pub fn save_arrangements(arrangements: &[Arrangement]) {
     match serde_json::to_string_pretty(arrangements) {
         Ok(json) => {
-            if let Err(e) = std::fs::write(ARRANGEMENTS_FILE, &json) {
+            if let Err(e) = std::fs::write(arrangements_path(), &json) {
                 log::error!(
                     "Kon arrangementen niet opslaan naar '{}': {}",
-                    ARRANGEMENTS_FILE,
+                    arrangements_path().display(),
                     e
                 );
             }

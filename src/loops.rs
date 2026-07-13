@@ -119,14 +119,18 @@ fn default_tempo() -> f32 {
 // Laden / Opslaan
 // ───────────────────────────────────────────────
 
-const LIBRARY_FILE: &str = "library.json";
-const OLD_LOOPS_FILE: &str = "loops.json";
+fn library_path() -> std::path::PathBuf {
+    crate::session::data_dir().join("library.json")
+}
+fn old_loops_path() -> std::path::PathBuf {
+    crate::session::data_dir().join("loops.json")
+}
 
 /// Laad de bibliotheek van schijf. Migreert oude loops.json indien nodig.
 /// Wist kort nadien bestaande loops zonder short_id een ID toe.
 pub fn load_library() -> Library {
     // Probeer nieuwe format eerst
-    match std::fs::read_to_string(LIBRARY_FILE) {
+    match std::fs::read_to_string(library_path()) {
         Ok(json) => match serde_json::from_str::<Library>(&json) {
             Ok(mut lib) => {
                 assign_short_ids(&mut lib);
@@ -135,7 +139,7 @@ pub fn load_library() -> Library {
             Err(e) => {
                 log::warn!(
                     "Kon '{}' niet parsen ({}), val terug op oude format",
-                    LIBRARY_FILE,
+                    library_path().display(),
                     e
                 );
             }
@@ -143,14 +147,14 @@ pub fn load_library() -> Library {
         Err(e) => {
             log::debug!(
                 "'{}' niet gevonden ({}), probeer oude format",
-                LIBRARY_FILE,
+                library_path().display(),
                 e
             );
         }
     }
 
     // Fallback: migreer oude loops.json
-    if let Ok(json) = std::fs::read_to_string(OLD_LOOPS_FILE) {
+    if let Ok(json) = std::fs::read_to_string(old_loops_path()) {
         if let Ok(old_loops) = serde_json::from_str::<Vec<OldSavedLoop>>(&json) {
             let mut lib = Library::empty();
             for old in old_loops {
@@ -169,10 +173,10 @@ pub fn load_library() -> Library {
             assign_short_ids(&mut lib);
             save_library(&lib);
             // Verwijder oud bestand (optioneel, maar netjes)
-            if let Err(e) = std::fs::remove_file(OLD_LOOPS_FILE) {
+            if let Err(e) = std::fs::remove_file(old_loops_path()) {
                 log::warn!(
                     "Kon oud bestand '{}' niet verwijderen: {}",
-                    OLD_LOOPS_FILE,
+                    old_loops_path().display(),
                     e
                 );
             }
@@ -187,8 +191,12 @@ pub fn load_library() -> Library {
 pub fn save_library(library: &Library) {
     match serde_json::to_string_pretty(library) {
         Ok(json) => {
-            if let Err(e) = std::fs::write(LIBRARY_FILE, &json) {
-                log::error!("Kon library niet opslaan naar '{}': {}", LIBRARY_FILE, e);
+            if let Err(e) = std::fs::write(library_path(), &json) {
+                log::error!(
+                    "Kon library niet opslaan naar '{}': {}",
+                    library_path().display(),
+                    e
+                );
             }
         }
         Err(e) => {
@@ -425,10 +433,21 @@ mod tests {
     #[test]
     fn test_library_migration_creates_short_ids() {
         use std::fs;
+        use std::path::PathBuf;
 
-        // Opruimen: verwijder library.json zodat load_library() naar loops.json valt
-        let _ = fs::remove_file(LIBRARY_FILE);
-        let _ = fs::remove_file(OLD_LOOPS_FILE);
+        // Redirect APPDATA naar een tijdelijke map zodat we niet naar %APPDATA% schrijven
+        let tmp = std::env::temp_dir().join("loopmachine_test_migration");
+        let _ = fs::create_dir_all(&tmp);
+        std::env::set_var("APPDATA", &tmp);
+
+        // Bepaal paden via data_dir() zodat load_library() ze kan vinden
+        let data = crate::session::data_dir();
+        let lib_path: PathBuf = data.join("library.json");
+        let old_path: PathBuf = data.join("loops.json");
+
+        // Opruimen
+        let _ = fs::remove_file(&lib_path);
+        let _ = fs::remove_file(&old_path);
 
         // Schrijf oude format
         let old_json = r#"[
@@ -441,7 +460,7 @@ mod tests {
                 "tempo": 1.0
             }
         ]"#;
-        fs::write(OLD_LOOPS_FILE, old_json).unwrap();
+        fs::write(&old_path, old_json).unwrap();
 
         // Laad — dit zou de oude loops.json moeten migreren
         let lib = load_library();
@@ -461,12 +480,14 @@ mod tests {
 
         // Nieuw bestand moet aangemaakt zijn
         assert!(
-            Path::new(LIBRARY_FILE).exists(),
+            lib_path.exists(),
             "library.json moet aangemaakt zijn na migratie"
         );
 
         // Cleanup
-        let _ = fs::remove_file(LIBRARY_FILE);
+        let _ = fs::remove_file(&lib_path);
+        let _ = fs::remove_file(&old_path);
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
