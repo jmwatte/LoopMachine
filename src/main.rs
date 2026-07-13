@@ -12,23 +12,37 @@ mod waveform;
 mod waveform_player;
 
 fn main() -> Result<(), eframe::Error> {
-    // ── Logger: schrijf naar bestand (console is onzichtbaar met windows_subsystem) ──
-    let log_path = crate::session::data_dir().join("loopmachine.log");
+    // ── Zorg dat data-directory bestaat ──
+    let data_dir = crate::session::data_dir();
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    // ── Logger: schrijf naar bestand ──
+    let log_path = data_dir.join("loopmachine.log");
     let _ = std::fs::remove_file(&log_path);
-    if let Ok(log_file) = std::fs::File::create(&log_path) {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
-            .format_timestamp_millis()
-            .target(env_logger::Target::Pipe(Box::new(log_file)))
-            .init();
-    } else {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
-            .format_timestamp_millis()
-            .init();
+    match std::fs::File::create(&log_path) {
+        Ok(log_file) => {
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+                .format_timestamp_millis()
+                .target(env_logger::Target::Pipe(Box::new(log_file)))
+                .init();
+        }
+        Err(e) => {
+            // Fallback: stderr (werkt alleen als console zichtbaar is)
+            eprintln!(
+                "Kon logbestand niet aanmaken '{}': {}",
+                log_path.display(),
+                e
+            );
+            env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+                .format_timestamp_millis()
+                .init();
+        }
     }
 
-    log::info!("LoopMachine gestart — logbestand: {}", log_path.display());
+    log::info!("LoopMachine gestart — log: {}", log_path.display());
 
-    // Migreer data van oude locatie (working directory) naar %APPDATA%/LoopMachine/
+    // Migreer data van oude locatie naar %APPDATA%/LoopMachine/
+    crate::session::data_dir(); // forceer aanmaken
     crate::loops::migrate_if_needed();
 
     let options = eframe::NativeOptions {

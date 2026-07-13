@@ -26,22 +26,26 @@ impl VideoPlayer {
     /// Open video in mpv en maak permanente pipe-connectie.
     pub fn open(&mut self, video_path: &str) -> Result<(), String> {
         self.close();
+        // Vang mpv's stderr zodat we fouten kunnen zien
+        let stderr_log = crate::session::data_dir().join("mpv_stderr.log");
+        let stderr_file = std::fs::File::create(&stderr_log)
+            .map_err(|e| format!("Kan mpv log niet aanmaken: {}", e))?;
+
         let process = Command::new(&self.mpv_path)
             .args(&[
-                "--no-terminal",
                 "--pause",
                 "--volume=0",
                 &format!("--input-ipc-server={}", MPV_PIPE),
                 video_path,
             ])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(stderr_file)
             .spawn()
             .map_err(|e| format!("Kan mpv niet starten: {}", e))?;
         self.process = Some(process);
 
         // Wacht tot mpv de pipe heeft aangemaakt
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(1000));
 
         // Maak permanente pipe-connectie
         #[cfg(target_os = "windows")]
