@@ -134,9 +134,17 @@ impl ToolbarAction {
             Self::ZoomOut => Some(ShortcutAction::ZoomOut),
             Self::ZoomIn => Some(ShortcutAction::ZoomIn),
             Self::ResetZoom => Some(ShortcutAction::ResetZoom),
-            Self::PlaceBeats => Some(ShortcutAction::AddBeatMarker),
             Self::Export => Some(ShortcutAction::ExportLoops),
-            _ => None, // Detect, ExtendBeats, Setup, ToggleAudit, ToggleArranger hebben geen directe ShortcutAction
+            Self::Detect => Some(ShortcutAction::Detect),
+            Self::ExtendBeats => Some(ShortcutAction::ExtendBeats),
+            Self::PlaceBeats => Some(ShortcutAction::PlaceBeats),
+            Self::ToggleArranger => Some(ShortcutAction::ToggleArranger),
+            Self::Setup => Some(ShortcutAction::Setup),
+            Self::ToggleAudit => Some(ShortcutAction::ToggleAudit),
+            Self::TempoDown => Some(ShortcutAction::TempoDown),
+            Self::TempoUp => Some(ShortcutAction::TempoUp),
+            Self::PitchDown => Some(ShortcutAction::PitchDown),
+            Self::PitchUp => Some(ShortcutAction::PitchUp),
         }
     }
 
@@ -196,6 +204,18 @@ pub enum ShortcutAction {
     Stop,
     SeekForward,
     SeekBackward,
+
+    // Toolbaar-acties (geen vaste shortcut, maar wel definieerbaar)
+    Detect,
+    ExtendBeats,
+    PlaceBeats,
+    ToggleArranger,
+    Setup,
+    ToggleAudit,
+    TempoDown,
+    TempoUp,
+    PitchDown,
+    PitchUp,
 
     // Loop
     SetLoopA,
@@ -287,6 +307,16 @@ impl ShortcutAction {
             Self::SnapLoopRight => "Snap loop to nearest marker right",
             Self::MarkerPrev => "Seek playhead to previous marker",
             Self::MarkerNext => "Seek playhead to next marker",
+            Self::Detect => "Detect key & BPM",
+            Self::ExtendBeats => "Extend beats across track",
+            Self::PlaceBeats => "Place beat markers",
+            Self::ToggleArranger => "Toggle arranger window",
+            Self::Setup => "Open setup window",
+            Self::ToggleAudit => "Toggle beat audit",
+            Self::TempoDown => "Tempo -10%",
+            Self::TempoUp => "Tempo +10%",
+            Self::PitchDown => "Pitch -1 semitone",
+            Self::PitchUp => "Pitch +1 semitone",
             Self::ExportLoops => "Export loops...",
         }
     }
@@ -323,6 +353,16 @@ impl ShortcutAction {
             Self::ZoomIn | Self::ZoomOut | Self::ResetZoom | Self::ShowShortcuts => "View",
             Self::OpenFile => "File",
             Self::Undo | Self::Redo | Self::RestartLoop => "Edit",
+            Self::Detect
+            | Self::ExtendBeats
+            | Self::PlaceBeats
+            | Self::ToggleArranger
+            | Self::Setup
+            | Self::ToggleAudit
+            | Self::TempoDown
+            | Self::TempoUp
+            | Self::PitchDown
+            | Self::PitchUp => "Tools",
             Self::ExportLoops => "File",
         }
     }
@@ -368,6 +408,16 @@ impl ShortcutAction {
             Self::SnapLoopLeft,
             Self::SnapLoopRight,
             Self::ExportLoops,
+            Self::Detect,
+            Self::ExtendBeats,
+            Self::PlaceBeats,
+            Self::ToggleArranger,
+            Self::Setup,
+            Self::ToggleAudit,
+            Self::TempoDown,
+            Self::TempoUp,
+            Self::PitchDown,
+            Self::PitchUp,
         ]
     }
 }
@@ -875,8 +925,12 @@ impl Default for ShortcutsConfig {
         );
         bindings.insert(
             ShortcutAction::SnapLoopRight,
-            KeyBinding::new(SerializableKey::W),
+            KeyBinding::new(SerializableKey::Q),
         );
+
+        // Tools (geen default shortcuts, maar wel aanpasbaar)
+        // Detect, ExtendBeats, PlaceBeats, ToggleArranger, Setup,
+        // ToggleAudit, TempoDown, TempoUp, PitchDown, PitchUp
 
         Self {
             version: CURRENT_VERSION,

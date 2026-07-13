@@ -1320,7 +1320,7 @@ impl LoopEditorApp {
 
     /// Verwerk toetsenbord shortcuts (behalve als tekstveld focus heeft).
     fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        // ── Keyboard Shortcuts ──
+        // ── Toetsenbord shortcuts ──
         let is_text_focused = ctx.memory(|mem| mem.focused().is_some());
         if let Some(action) = self.listening_for_action {
             if let Some(key_event) = ctx.input(|i| i.keys_down.iter().next().copied()) {
@@ -2203,6 +2203,68 @@ impl LoopEditorApp {
                 }
             }
 
+            // Tools — hergebruik execute_toolbar_action logica
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::Detect, &ctx.input(|i| i.clone()))
+            {
+                self.run_detection();
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ExtendBeats, &ctx.input(|i| i.clone()))
+            {
+                self.extend_beat_markers();
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::PlaceBeats, &ctx.input(|i| i.clone()))
+            {
+                self.execute_toolbar_action(ToolbarAction::PlaceBeats);
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ToggleArranger, &ctx.input(|i| i.clone()))
+            {
+                self.show_arranger ^= true;
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::Setup, &ctx.input(|i| i.clone()))
+            {
+                self.show_setup ^= true;
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ToggleAudit, &ctx.input(|i| i.clone()))
+            {
+                self.toggle_beat_audit();
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::TempoDown, &ctx.input(|i| i.clone()))
+            {
+                self.execute_toolbar_action(ToolbarAction::TempoDown);
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::TempoUp, &ctx.input(|i| i.clone()))
+            {
+                self.execute_toolbar_action(ToolbarAction::TempoUp);
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::PitchDown, &ctx.input(|i| i.clone()))
+            {
+                self.execute_toolbar_action(ToolbarAction::PitchDown);
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::PitchUp, &ctx.input(|i| i.clone()))
+            {
+                self.execute_toolbar_action(ToolbarAction::PitchUp);
+            }
+
             // ExportLoops — open export window
             if self
                 .shortcuts
@@ -2321,7 +2383,7 @@ impl eframe::App for LoopEditorApp {
                         .color(Color32::GRAY),
                 );
 
-                // ── Right-side buttons + status ──
+                // ── Rechterkant knoppen + status ──
                 // Alles in 1 right_to_left blok: buttons eerst (meest rechts),
                 // status ernaast (links van de buttons).
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3151,7 +3213,7 @@ impl eframe::App for LoopEditorApp {
             }
         }
 
-        // ── Export Window ──
+        // ── Export venster ──
         if self.export_state.show_window {
             let track_path = match self.waveform_state.path.clone() {
                 Some(p) => p,
