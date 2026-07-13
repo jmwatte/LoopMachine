@@ -396,6 +396,96 @@ pub fn decode_audio(
     Ok((samples, sample_rate, duration_secs, large_file_warning))
 }
 
+/// Decodeer audio uit een videobestand via ffmpeg CLI.
+/// Geeft samples terug in hetzelfde formaat als `decode_audio()`.
+pub fn decode_video_audio(
+    path: &str,
+    ffmpeg_path: &str,
+    mode: ChannelMode,
+) -> Result<(Vec<f32>, u32, f32, Option<String>), String> {
+    use std::io::Read;
+    use std::process::Command;
+
+    log::info!("Extraheer audio uit video via ffmpeg: {}", path);
+
+    // ffmpeg: decodeer naar raw f32le mono, 44100 Hz, via stdout
+    let mut child = Command::new(ffmpeg_path)
+        .args(&[
+            "-i",
+            path,
+            "-f",
+            "f32le", // raw f32 output
+            "-ac",
+            "1", // mono
+            "-ar",
+            "44100", // 44.1 kHz
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-", // stdout
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "Kan ffmpeg niet starten: {}. Download van https://ffmpeg.org",
+                e
+            )
+        })?;
+
+    let mut stdout = child.stdout.take().ok_or("Geen output van ffmpeg")?;
+    let mut raw_bytes: Vec<u8> = Vec::new();
+    stdout
+        .read_to_end(&mut raw_bytes)
+        .map_err(|e| format!("Fout bij lezen ffmpeg output: {}", e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("ffmpeg proces fout: {}", e))?;
+    if !status.success() {
+        // Wacht op stderr voor foutmelding
+        let mut stderr = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            let _ = err.read_to_string(&mut stderr);
+        }
+        return Err(format!(
+            "ffmpeg fout (exit code {:?}): {}",
+            status.code(),
+            stderr
+        ));
+    }
+
+    if raw_bytes.is_empty() {
+        return Err(
+            "ffmpeg gaf geen audio-data terug — mogelijk geen audiotrack in video?".to_string(),
+        );
+    }
+
+    // Converteer raw bytes naar f32 samples
+    let sample_count = raw_bytes.len() / 4;
+    let mut samples = Vec::with_capacity(sample_count);
+
+    // Lees als f32 little-endian
+    // ffmpeg f32le output is native f32 bytes
+    for chunk in raw_bytes.chunks_exact(4) {
+        let bytes: [u8; 4] = [chunk[0], chunk[1], chunk[2], chunk[3]];
+        let sample = f32::from_le_bytes(bytes);
+        samples.push(sample);
+    }
+
+    let sample_rate: u32 = 44100;
+    let duration_secs = samples.len() as f32 / sample_rate as f32;
+
+    log::info!(
+        "Video audio geladen: {:.1}s, {} samples",
+        duration_secs,
+        samples.len()
+    );
+
+    Ok((samples, sample_rate, duration_secs, None))
+}
+
 /// Teken de waveform in een egui UI.
 /// Geeft `(loop_changed, seek_to, drag_ended)` terug:
 /// - loop_changed: Of de A-B loop markers zijn gewijzigd

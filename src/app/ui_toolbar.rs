@@ -157,6 +157,7 @@ impl LoopEditorApp {
                 if self.waveform_is_playing {
                     self.send_cmd(WaveformCommand::SetTempo(self.waveform_state.tempo));
                 }
+                self.sync_video_speed();
                 self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
                 self.status_message_timer = 2 * 60;
             }
@@ -166,6 +167,7 @@ impl LoopEditorApp {
                 if self.waveform_is_playing {
                     self.send_cmd(WaveformCommand::SetTempo(self.waveform_state.tempo));
                 }
+                self.sync_video_speed();
                 self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
                 self.status_message_timer = 2 * 60;
             }

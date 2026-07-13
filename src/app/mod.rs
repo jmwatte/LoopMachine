@@ -358,6 +358,10 @@ impl LoopEditorApp {
                 match player.open(path) {
                     Ok(()) => {
                         self.video_player = Some(player);
+                        self.sync_video_playback();
+                        self.sync_video_position();
+                        self.sync_video_speed();
+                        self.sync_video_loop();
                         self.status_message = "🎬 Video-speler geopend".to_string();
                     }
                     Err(e) => {
@@ -369,15 +373,46 @@ impl LoopEditorApp {
         }
     }
 
-    /// Sync mpv met huidige play-state (positie, play/pause).
-    pub fn sync_video(&self) {
+    /// Sync mpv play/pause met LoopMachine (lichtgewicht, geen seek).
+    pub fn sync_video_playback(&self) {
         if let Some(ref player) = self.video_player {
             if self.waveform_is_playing {
                 player.resume();
             } else {
                 player.pause();
             }
+        }
+    }
+
+    /// Sync mpv positie — alleen aanroepen bij echte seeks, niet bij positie-updates.
+    pub fn sync_video_position(&self) {
+        if let Some(ref player) = self.video_player {
             player.seek(self.waveform_play_position);
+        }
+    }
+
+    /// Sync mpv speed met LoopMachine tempo (1.0 = normaal, 0.5 = half).
+    pub fn sync_video_speed(&self) {
+        if let Some(ref player) = self.video_player {
+            player.set_speed(self.waveform_state.tempo);
+        }
+    }
+
+    /// Sync mpv A-B loop met LoopMachine loop bounds.
+    pub fn sync_video_loop(&self) {
+        if let Some(ref player) = self.video_player {
+            match (
+                self.waveform_state.loop_a_secs,
+                self.waveform_state.loop_b_secs,
+            ) {
+                (Some(a), Some(b)) if b > a && !self.loop_bypassed => {
+                    player.set_loop_a(a);
+                    player.set_loop_b(b);
+                }
+                _ => {
+                    player.clear_loop();
+                }
+            }
         }
     }
 
@@ -400,7 +435,17 @@ impl LoopEditorApp {
             self.waveform_has_content = false;
         }
 
-        match crate::waveform::decode_audio(path, self.waveform_state.channel_mode) {
+        let result = if self.is_video_file() {
+            if let Some(ref ffmpeg) = self.ffmpeg_path {
+                crate::waveform::decode_video_audio(path, ffmpeg, self.waveform_state.channel_mode)
+            } else {
+                Err("Video-bestand geladen, maar ffmpeg is niet geconfigureerd.\nGa naar Setup → Video om ffmpeg in te stellen.".to_string())
+            }
+        } else {
+            crate::waveform::decode_audio(path, self.waveform_state.channel_mode)
+        };
+
+        match result {
             Ok((samples, sample_rate, duration_secs, warning)) => {
                 self.waveform_state.path = Some(path.to_string());
                 // Bouw waveform summary voor snelle weergave bij elke zoom
@@ -707,6 +752,7 @@ impl LoopEditorApp {
             a_secs: a,
             b_secs: b,
         });
+        self.sync_video_loop();
     }
 
     /// Speel een heel arrangement af (fire & forget naar audio-thread).
@@ -1052,12 +1098,14 @@ impl eframe::App for LoopEditorApp {
                     if self.waveform_is_playing {
                         self.send_cmd(WaveformCommand::SetTempo(tempo));
                     }
+                    self.sync_video_speed();
                 }
                 if ui.button("⟲").clicked() {
                     self.waveform_state.tempo = 1.0;
                     if self.waveform_is_playing {
                         self.send_cmd(WaveformCommand::SetTempo(1.0));
                     }
+                    self.sync_video_speed();
                 }
 
                 ui.separator();

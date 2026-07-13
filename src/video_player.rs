@@ -16,12 +16,13 @@ impl VideoPlayer {
         }
     }
 
-    /// Open video in mpv (gelinked met onze pipe)
+    /// Open video in mpv (gelinked met onze pipe) — start muted, want audio komt via LoopMachine.
     pub fn open(&mut self, video_path: &str) -> Result<(), String> {
         self.close();
         let process = Command::new(&self.mpv_path)
             .args(&[
                 "--no-terminal",
+                "--volume=0",
                 &format!("--input-ipc-server={}", MPV_PIPE),
                 &format!("--start=0"),
                 video_path,
@@ -71,6 +72,39 @@ impl VideoPlayer {
 
     pub fn resume(&self) {
         let _ = self.send_command(r#"{ "command": ["set_property", "pause", false] }"#);
+    }
+
+    pub fn set_speed(&self, speed: f32) {
+        let _ = self.send_command(&format!(
+            r#"{{ "command": ["set_property", "speed", {}] }}"#,
+            speed
+        ));
+    }
+
+    pub fn set_loop_a(&self, secs: f32) {
+        let _ = self.send_command(&format!(
+            r#"{{ "command": ["set_property", "ab-loop-a", {}] }}"#,
+            secs
+        ));
+    }
+
+    pub fn set_loop_b(&self, secs: f32) {
+        let _ = self.send_command(&format!(
+            r#"{{ "command": ["set_property", "ab-loop-b", {}] }}"#,
+            secs
+        ));
+    }
+
+    pub fn clear_loop(&self) {
+        let _ = self.send_command(r#"{ "command": ["set_property", "ab-loop-a", "no"] }"#);
+    }
+
+    /// Zet mpv volume (0-100). 0 = stil — wij luisteren via LoopMachine.
+    pub fn set_volume(&self, vol: f32) {
+        let _ = self.send_command(&format!(
+            r#"{{ "command": ["set_property", "volume", {}] }}"#,
+            vol
+        ));
     }
 
     pub fn close(&mut self) {

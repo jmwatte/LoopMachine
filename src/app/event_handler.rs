@@ -17,23 +17,23 @@ impl LoopEditorApp {
                 WaveformEvent::Playing => {
                     self.waveform_is_playing = true;
                     self.waveform_has_content = true;
-                    self.sync_video();
+                    self.sync_video_playback();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Stopped => {
                     self.waveform_is_playing = false;
                     self.waveform_has_content = false;
-                    self.sync_video();
+                    self.sync_video_playback();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Paused => {
                     self.waveform_is_playing = false;
-                    self.sync_video();
+                    self.sync_video_playback();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Resumed => {
                     self.waveform_is_playing = true;
-                    self.sync_video();
+                    self.sync_video_playback();
                     ctx.request_repaint();
                 }
                 WaveformEvent::Error(msg) => {
@@ -44,12 +44,14 @@ impl LoopEditorApp {
                 WaveformEvent::Position(pos, dur) => {
                     self.waveform_play_duration = dur;
 
+                    let mut seek_completed = false;
                     // ✅ Check of de audio-thread de seek heeft voltooid
-                    if let Some(target) = self.waveform_state.seek_pending {
-                        // Als de audio-thread binnen 50ms (0.05s) van de target positie is,
-                        // beschouwen we de seek als geslaagd.
-                        if (pos - target).abs() < 0.05 {
-                            self.waveform_state.seek_pending = None;
+                    if self.waveform_state.seek_pending.is_some() {
+                        if let Some(target) = self.waveform_state.seek_pending {
+                            if (pos - target).abs() < 0.05 {
+                                self.waveform_state.seek_pending = None;
+                                seek_completed = true;
+                            }
                         }
                     }
 
@@ -61,9 +63,9 @@ impl LoopEditorApp {
                         && !self.waveform_state.dragging_playhead
                     {
                         self.waveform_play_position = pos;
-                        // Sync video positie (alleen als seek voltooid is)
-                        if self.video_player.is_some() {
-                            self.sync_video();
+                        // Sync video positie ALLEEN bij voltooide seek, niet bij elke frame
+                        if seek_completed && self.video_player.is_some() {
+                            self.sync_video_position();
                         }
                     }
 

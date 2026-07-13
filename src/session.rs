@@ -2,7 +2,15 @@ use crate::shortcuts::ToolbarAction;
 use log;
 use serde::{Deserialize, Serialize};
 
-const SESSION_FILE: &str = "session.json";
+/// Bepaal het pad naar session.json — naast de executable, niet in de working directory.
+fn session_path() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join("session.json");
+        }
+    }
+    std::path::PathBuf::from("session.json")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
@@ -85,8 +93,9 @@ impl SessionState {
         };
         match serde_json::to_string_pretty(&state) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(SESSION_FILE, &json) {
-                    log::error!("Kon sessie niet opslaan naar '{}': {}", SESSION_FILE, e);
+                let path = session_path();
+                if let Err(e) = std::fs::write(&path, &json) {
+                    log::error!("Kon sessie niet opslaan naar '{}': {}", path.display(), e);
                 }
             }
             Err(e) => {
@@ -96,7 +105,8 @@ impl SessionState {
     }
 
     pub fn load() -> Option<SessionState> {
-        match std::fs::read_to_string(SESSION_FILE) {
+        let path = session_path();
+        match std::fs::read_to_string(&path) {
             Ok(json) => serde_json::from_str(&json).ok(),
             Err(_) => None,
         }
