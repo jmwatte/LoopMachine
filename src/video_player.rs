@@ -26,21 +26,30 @@ impl VideoPlayer {
     pub fn open(&mut self, video_path: &str) -> Result<(), String> {
         self.close();
 
-        let stderr_log = crate::session::data_dir().join("mpv_stderr.log");
-        let stderr_file = std::fs::File::create(&stderr_log)
-            .map_err(|e| format!("Kan mpv log niet aanmaken: {}", e))?;
+        // 1. Bepaal de map waar mpv.exe staat (CRUCIAAL voor portable mpv)
+        let mpv_exe = std::path::Path::new(&self.mpv_path);
+        let mpv_dir = mpv_exe
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+
+        // 2. Gebruik mpv's EIGEN logger (veel betrouwbaarder dan Rust stderr capture)
+        let mpv_native_log = crate::session::data_dir().join("mpv_native_log.txt");
+        log::info!("📝 mpv's interne logbestand: {:?}", mpv_native_log);
 
         let process = Command::new(&self.mpv_path)
+            .current_dir(mpv_dir) // ✅ FIX 1: Zet de werkmap op de mpv-map, zodat DLL's/codecs gevonden worden
             .args(&[
                 "--no-terminal",
-                "--keep-open=yes", // ✅ FIX 2: Voorkom dat mpv sluit bij einde bestand
+                "--keep-open=yes",
+                "--force-window=yes",
                 "--pause",
                 "--volume=0",
+                &format!("--log-file={}", mpv_native_log.display()), // ✅ FIX 2: mpv's eigen interne logger
                 &format!("--input-ipc-server={}", MPV_PIPE),
                 video_path,
             ])
             .stdout(Stdio::null())
-            .stderr(stderr_file)
+            .stderr(Stdio::null()) // We hoeven stderr niet meer te vangen, --log-file doet het beter
             .spawn()
             .map_err(|e| format!("Kan mpv niet starten: {}", e))?;
 
@@ -51,36 +60,29 @@ impl VideoPlayer {
         {
             use std::fs::OpenOptions;
 
-            // ✅ FIX 3: Open TWEE volledig onafhankelijke verbindingen naar de pipe.
-            // Dit omzeilt de Windows I/O serialisatie deadlock die ontstaat bij try_clone().
-
-            // 1. Dedicated WRITE verbinding
             let write_pipe = OpenOptions::new()
                 .write(true)
                 .open(MPV_PIPE)
                 .map_err(|e| format!("Pipe write error: {}", e))?;
 
-            // 2. Dedicated READ verbinding (nieuwe OS handle, geen clone!)
             let read_pipe = OpenOptions::new()
                 .read(true)
                 .open(MPV_PIPE)
                 .map_err(|e| format!("Pipe read error: {}", e))?;
 
-            // Achtergrond-thread die de read-pipe continu leegzuigt
             thread::spawn(move || {
                 let reader = BufReader::new(read_pipe);
                 for line in reader.lines() {
                     match line {
-                        Ok(text) => log::debug!("mpv: {}", text),
-                        Err(_) => break, // Pipe verbroken (mpv gesloten)
+                        Ok(text) => log::debug!("mpv ipc: {}", text),
+                        Err(_) => break,
                     }
                 }
                 log::debug!("mpv reader gestopt");
             });
 
-            // We slaan ALLEEN de write-pipe op voor onze commando's
             *self.pipe.lock().unwrap() = Some(write_pipe);
-            log::info!("mpv pipe geopend (gesplitst read/write, deadlock-vrij)");
+            log::info!("mpv pipe geopend (gesplitst read/write)");
         }
         Ok(())
     }
