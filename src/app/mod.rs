@@ -322,7 +322,7 @@ impl LoopEditorApp {
         // Stop huidige playback als er een ander bestand wordt geladen
         if self.waveform_state.path.as_deref() != Some(path) {
             if self.waveform_is_playing {
-                let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+                self.send_cmd(WaveformCommand::Stop);
                 self.waveform_is_playing = false;
             }
             self.waveform_has_content = false;
@@ -631,7 +631,7 @@ impl LoopEditorApp {
     fn sync_loop_bounds(&mut self) {
         let a = self.waveform_state.loop_a_secs.unwrap_or(0.0);
         let b = self.waveform_state.loop_b_secs.unwrap_or(0.0);
-        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+        self.send_cmd(WaveformCommand::SetLoopBounds {
             a_secs: a,
             b_secs: b,
         });
@@ -672,7 +672,7 @@ impl LoopEditorApp {
             }
 
             if !seq_steps.is_empty() {
-                let _ = self.waveform_cmd_tx.send(WaveformCommand::PlaySequence {
+                self.send_cmd(WaveformCommand::PlaySequence {
                     sequence_steps: seq_steps,
                     pitch_semitones: Arc::new(AtomicU32::new(f32::to_bits(
                         self.waveform_state.pitch_semitones,
@@ -689,6 +689,14 @@ impl LoopEditorApp {
     }
 
     /// Sla de huidige A-B selectie op als een nieuwe loop in de bibliotheek.
+    /// Stuur een commando naar de audio-thread via het crossbeam-kanaal.
+    /// Logt een error als het verzenden mislukt (audio-thread is dan gestopt).
+    fn send_cmd(&self, cmd: WaveformCommand) {
+        if let Err(e) = self.waveform_cmd_tx.send(cmd) {
+            log::error!("Kon commando niet verzenden naar audio-thread: {}", e);
+        }
+    }
+
     fn save_current_loop(&mut self) -> bool {
         if let (Some(a), Some(b)) = (
             self.waveform_state.loop_a_secs,
@@ -906,7 +914,7 @@ impl LoopEditorApp {
                 self.waveform_state.loop_b_secs = None;
                 self.pending_loop_point = None;
                 self.push_undo();
-                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                self.send_cmd(WaveformCommand::SetLoopBounds {
                     a_secs: 0.0,
                     b_secs: 0.0,
                 });
@@ -951,9 +959,7 @@ impl LoopEditorApp {
                 self.push_undo();
                 self.waveform_state.tempo = (self.waveform_state.tempo / 1.1).max(0.1);
                 if self.waveform_is_playing {
-                    let _ = self
-                        .waveform_cmd_tx
-                        .send(WaveformCommand::SetTempo(self.waveform_state.tempo));
+                    self.send_cmd(WaveformCommand::SetTempo(self.waveform_state.tempo));
                 }
                 self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
                 self.status_message_timer = 2 * 60;
@@ -962,9 +968,7 @@ impl LoopEditorApp {
                 self.push_undo();
                 self.waveform_state.tempo = (self.waveform_state.tempo * 1.1).min(3.0);
                 if self.waveform_is_playing {
-                    let _ = self
-                        .waveform_cmd_tx
-                        .send(WaveformCommand::SetTempo(self.waveform_state.tempo));
+                    self.send_cmd(WaveformCommand::SetTempo(self.waveform_state.tempo));
                 }
                 self.status_message = format!("Tempo: {:.0}%", self.waveform_state.tempo * 100.0);
                 self.status_message_timer = 2 * 60;
@@ -974,7 +978,7 @@ impl LoopEditorApp {
                 self.waveform_state.pitch_semitones =
                     (self.waveform_state.pitch_semitones - 1.0).max(-12.0);
                 if self.waveform_is_playing {
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(
+                    self.send_cmd(WaveformCommand::SetPitch(
                         self.waveform_state.pitch_semitones,
                     ));
                 }
@@ -989,7 +993,7 @@ impl LoopEditorApp {
                 self.waveform_state.pitch_semitones =
                     (self.waveform_state.pitch_semitones + 1.0).min(12.0);
                 if self.waveform_is_playing {
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(
+                    self.send_cmd(WaveformCommand::SetPitch(
                         self.waveform_state.pitch_semitones,
                     ));
                 }
@@ -1257,7 +1261,7 @@ impl eframe::App for LoopEditorApp {
                                 // Stop pas als de teller boven loop_repeat_count uitkomt.
                                 // Bij 2 wil de gebruiker 2× horen: 1/2 en 2/2, dus stoppen bij 3.
                                 if self.loop_iteration_count > self.loop_repeat_count {
-                                    let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+                                    self.send_cmd(WaveformCommand::Stop);
                                     self.waveform_is_playing = false;
                                     self.status_message = format!(
                                         "Loop {}/{} — gestopt",
@@ -1348,7 +1352,7 @@ impl eframe::App for LoopEditorApp {
             {
                 if self.waveform_has_content {
                     // Audio is geladen (speelt of gepauzeerd) → toggle
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::TogglePause);
+                    self.send_cmd(WaveformCommand::TogglePause);
                 } else if let Some(ref _path) = self.waveform_state.path {
                     // Nog niks geladen in audio-thread → start nieuwe playback
                     let (decode_start, play_start, decode_end) = match (
@@ -1373,7 +1377,7 @@ impl eframe::App for LoopEditorApp {
                     let a_sample = (decode_start * sr) as usize;
                     let b_sample = (decode_end * sr) as usize;
 
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+                    self.send_cmd(WaveformCommand::Play {
                         samples: self.waveform_state.samples.clone(),
                         sample_rate: self.waveform_state.sample_rate,
                         start_sample,
@@ -1573,9 +1577,7 @@ impl eframe::App for LoopEditorApp {
                     if let Some(target) = target {
                         self.waveform_play_position = target;
                         self.waveform_state.seek_pending = Some(target);
-                        let _ = self
-                            .waveform_cmd_tx
-                            .send(WaveformCommand::Seek { pos_secs: target });
+                        self.send_cmd(WaveformCommand::Seek { pos_secs: target });
                         self.waveform_state.playhead_frames_after_drag = 15;
                         self.status_message = format!("Playhead naar marker op {:.1}s", target);
                         self.status_message_timer = 2 * 60;
@@ -1600,9 +1602,7 @@ impl eframe::App for LoopEditorApp {
                     if let Some(target) = target {
                         self.waveform_play_position = target;
                         self.waveform_state.seek_pending = Some(target);
-                        let _ = self
-                            .waveform_cmd_tx
-                            .send(WaveformCommand::Seek { pos_secs: target });
+                        self.send_cmd(WaveformCommand::Seek { pos_secs: target });
                         self.waveform_state.playhead_frames_after_drag = 15;
                         self.status_message = format!("Playhead naar marker op {:.1}s", target);
                         self.status_message_timer = 2 * 60;
@@ -1618,7 +1618,7 @@ impl eframe::App for LoopEditorApp {
                 {
                     self.waveform_state.loop_a_secs = Some(self.waveform_play_position);
                     self.push_undo();
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                    self.send_cmd(WaveformCommand::SetLoopBounds {
                         a_secs: self.waveform_play_position,
                         b_secs: self
                             .waveform_state
@@ -1636,7 +1636,7 @@ impl eframe::App for LoopEditorApp {
                 {
                     self.waveform_state.loop_b_secs = Some(self.waveform_play_position);
                     self.push_undo();
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                    self.send_cmd(WaveformCommand::SetLoopBounds {
                         a_secs: self.waveform_state.loop_a_secs.unwrap_or(0.0),
                         b_secs: self.waveform_play_position,
                     });
@@ -1663,14 +1663,12 @@ impl eframe::App for LoopEditorApp {
                         self.waveform_state.seek_pending = Some(new_a);
                         self.waveform_state.playhead_frames_after_drag = 15;
 
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                        self.send_cmd(WaveformCommand::SetLoopBounds {
                             a_secs: new_a,
                             b_secs: new_b,
                         });
                         if self.waveform_has_content {
-                            let _ = self
-                                .waveform_cmd_tx
-                                .send(WaveformCommand::Seek { pos_secs: new_a });
+                            self.send_cmd(WaveformCommand::Seek { pos_secs: new_a });
                         }
                         self.status_message =
                             format!("Loop genudget ← naar {:.1}s–{:.1}s", new_a, new_b);
@@ -1701,14 +1699,12 @@ impl eframe::App for LoopEditorApp {
                         self.waveform_state.seek_pending = Some(new_a);
                         self.waveform_state.playhead_frames_after_drag = 15;
 
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                        self.send_cmd(WaveformCommand::SetLoopBounds {
                             a_secs: new_a,
                             b_secs: new_b,
                         });
                         if self.waveform_has_content {
-                            let _ = self
-                                .waveform_cmd_tx
-                                .send(WaveformCommand::Seek { pos_secs: new_a });
+                            self.send_cmd(WaveformCommand::Seek { pos_secs: new_a });
                         }
                         self.status_message =
                             format!("Loop genudget → naar {:.1}s–{:.1}s", new_a, new_b);
@@ -1735,7 +1731,7 @@ impl eframe::App for LoopEditorApp {
                             let new_b = (a + len * 2.0).min(self.waveform_state.duration_secs);
                             self.waveform_state.loop_a_secs = Some(new_a);
                             self.waveform_state.loop_b_secs = Some(new_b);
-                            let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                            self.send_cmd(WaveformCommand::SetLoopBounds {
                                 a_secs: new_a,
                                 b_secs: new_b,
                             });
@@ -1769,7 +1765,7 @@ impl eframe::App for LoopEditorApp {
                             if new_b > new_a {
                                 self.waveform_state.loop_a_secs = Some(new_a);
                                 self.waveform_state.loop_b_secs = Some(new_b);
-                                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                                self.send_cmd(WaveformCommand::SetLoopBounds {
                                     a_secs: new_a,
                                     b_secs: new_b,
                                 });
@@ -1945,9 +1941,7 @@ impl eframe::App for LoopEditorApp {
                 if let Some(pos) = new_pos {
                     self.waveform_play_position = pos;
                     self.waveform_state.seek_pending = Some(pos);
-                    let _ = self
-                        .waveform_cmd_tx
-                        .send(WaveformCommand::Seek { pos_secs: pos });
+                    self.send_cmd(WaveformCommand::Seek { pos_secs: pos });
                     self.waveform_state.playhead_frames_after_drag = 15;
                 }
             }
@@ -1987,9 +1981,7 @@ impl eframe::App for LoopEditorApp {
                     self.waveform_state.seek_pending = Some(new_pos); // ✅ NIEUW: Markeer als pending
 
                     // if self.waveform_has_content {
-                    let _ = self
-                        .waveform_cmd_tx
-                        .send(WaveformCommand::Seek { pos_secs: new_pos });
+                    self.send_cmd(WaveformCommand::Seek { pos_secs: new_pos });
                     // ✅ FIX: Negeer oude Position events voor ~250ms
                     self.waveform_state.playhead_frames_after_drag = 15;
                     //   }
@@ -2001,7 +1993,7 @@ impl eframe::App for LoopEditorApp {
                 .shortcuts
                 .is_pressed(ShortcutAction::Stop, &ctx.input(|i| i.clone()))
             {
-                let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+                self.send_cmd(WaveformCommand::Stop);
                 self.waveform_is_playing = false;
                 self.waveform_has_content = false;
             }
@@ -2015,7 +2007,7 @@ impl eframe::App for LoopEditorApp {
                 self.waveform_state.loop_b_secs = None;
                 self.pending_loop_point = None;
                 self.push_undo();
-                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                self.send_cmd(WaveformCommand::SetLoopBounds {
                     a_secs: 0.0,
                     b_secs: 0.0,
                 });
@@ -2029,9 +2021,7 @@ impl eframe::App for LoopEditorApp {
                 .is_pressed(ShortcutAction::ToggleLoopBypass, &ctx.input(|i| i.clone()))
             {
                 self.loop_bypassed = !self.loop_bypassed;
-                let _ = self
-                    .waveform_cmd_tx
-                    .send(WaveformCommand::SetLoopEnabled(!self.loop_bypassed));
+                self.send_cmd(WaveformCommand::SetLoopEnabled(!self.loop_bypassed));
                 self.status_message = if self.loop_bypassed {
                     "Loop bypassed — speelt door naar einde".to_string()
                 } else {
@@ -2064,7 +2054,7 @@ impl eframe::App for LoopEditorApp {
                     self.waveform_state.loop_b_secs = Some(b);
                     self.pending_loop_point = None;
                     self.push_undo();
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                    self.send_cmd(WaveformCommand::SetLoopBounds {
                         a_secs: a,
                         b_secs: b,
                     });
@@ -2151,7 +2141,7 @@ impl eframe::App for LoopEditorApp {
                             self.waveform_play_position = a;
                             self.waveform_state.seek_pending = Some(a);
                             self.waveform_state.playhead_frames_after_drag = 15;
-                            let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+                            self.send_cmd(WaveformCommand::Play {
                                 samples: self.waveform_state.samples.clone(),
                                 sample_rate: self.waveform_state.sample_rate,
                                 start_sample: (a * self.waveform_state.sample_rate as f32) as usize,
@@ -2178,7 +2168,7 @@ impl eframe::App for LoopEditorApp {
                         self.waveform_play_position = 0.0;
                         self.waveform_state.seek_pending = Some(0.0);
                         self.waveform_state.playhead_frames_after_drag = 15;
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+                        self.send_cmd(WaveformCommand::Play {
                             samples: self.waveform_state.samples.clone(),
                             sample_rate: self.waveform_state.sample_rate,
                             start_sample: 0,
@@ -2442,29 +2432,25 @@ impl eframe::App for LoopEditorApp {
                     self.waveform_state.loop_b_secs,
                 ) {
                     if b > a {
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                        self.send_cmd(WaveformCommand::SetLoopBounds {
                             a_secs: a,
                             b_secs: b,
                         });
                         // Als de loop was bypassed, heractiveer haar bij A/B-wijziging
                         if self.loop_bypassed {
                             self.loop_bypassed = false;
-                            let _ = self
-                                .waveform_cmd_tx
-                                .send(WaveformCommand::SetLoopEnabled(true));
+                            self.send_cmd(WaveformCommand::SetLoopEnabled(true));
                             self.status_message = "Loop geüpdatet en geactiveerd".to_string();
                             self.status_message_timer = 3 * 60;
                         }
                     }
                 } else {
                     // Rechterklik: loop gewist → stuur 0/0 naar audio-thread + expliciet uitschakelen
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                    self.send_cmd(WaveformCommand::SetLoopBounds {
                         a_secs: 0.0,
                         b_secs: 0.0,
                     });
-                    let _ = self
-                        .waveform_cmd_tx
-                        .send(WaveformCommand::SetLoopEnabled(false));
+                    self.send_cmd(WaveformCommand::SetLoopEnabled(false));
                     self.pending_loop_point = None;
                     self.status_message = "Loop gewist".to_string();
                     self.status_message_timer = 2 * 60;
@@ -2481,9 +2467,7 @@ impl eframe::App for LoopEditorApp {
                 self.waveform_play_position = seek_pos;
                 self.waveform_state.seek_pending = Some(seek_pos); // ✅ NIEUW: Markeer als pending
                                                                    //    if self.waveform_has_content {
-                let _ = self
-                    .waveform_cmd_tx
-                    .send(WaveformCommand::Seek { pos_secs: seek_pos });
+                self.send_cmd(WaveformCommand::Seek { pos_secs: seek_pos });
                 //  }
             }
 
@@ -2542,13 +2526,13 @@ impl eframe::App for LoopEditorApp {
                 if (pitch - old_pitch).abs() > 0.01 {
                     self.waveform_state.pitch_semitones = pitch;
                     if self.waveform_is_playing {
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(pitch));
+                        self.send_cmd(WaveformCommand::SetPitch(pitch));
                     }
                 }
                 if ui.button("⟲").clicked() {
                     self.waveform_state.pitch_semitones = 0.0;
                     if self.waveform_is_playing {
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetPitch(0.0));
+                        self.send_cmd(WaveformCommand::SetPitch(0.0));
                     }
                 }
 
@@ -2565,13 +2549,13 @@ impl eframe::App for LoopEditorApp {
                 if (tempo - old_tempo).abs() > 0.005 {
                     self.waveform_state.tempo = tempo;
                     if self.waveform_is_playing {
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetTempo(tempo));
+                        self.send_cmd(WaveformCommand::SetTempo(tempo));
                     }
                 }
                 if ui.button("⟲").clicked() {
                     self.waveform_state.tempo = 1.0;
                     if self.waveform_is_playing {
-                        let _ = self.waveform_cmd_tx.send(WaveformCommand::SetTempo(1.0));
+                        self.send_cmd(WaveformCommand::SetTempo(1.0));
                     }
                 }
 
@@ -2587,11 +2571,11 @@ impl eframe::App for LoopEditorApp {
                 );
                 if (vol - old_vol).abs() > 0.01 {
                     self.waveform_state.volume = vol;
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetVolume(vol));
+                    self.send_cmd(WaveformCommand::SetVolume(vol));
                 }
                 if ui.button("⟲").clicked() {
                     self.waveform_state.volume = 1.0;
-                    let _ = self.waveform_cmd_tx.send(WaveformCommand::SetVolume(1.0));
+                    self.send_cmd(WaveformCommand::SetVolume(1.0));
                 }
 
                 // Playback status
@@ -2623,7 +2607,7 @@ impl eframe::App for LoopEditorApp {
                     if b > a {
                         if self.waveform_is_playing {
                             if ui.button("⏹ Stop").clicked() {
-                                let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+                                self.send_cmd(WaveformCommand::Stop);
                                 self.waveform_is_playing = false;
                                 ctx.request_repaint();
                             }
@@ -2639,9 +2623,7 @@ impl eframe::App for LoopEditorApp {
                                 .clicked()
                             {
                                 self.loop_bypassed = !self.loop_bypassed;
-                                let _ = self
-                                    .waveform_cmd_tx
-                                    .send(WaveformCommand::SetLoopEnabled(!self.loop_bypassed));
+                                self.send_cmd(WaveformCommand::SetLoopEnabled(!self.loop_bypassed));
                                 self.status_message = if self.loop_bypassed {
                                     "Loop bypassed — speelt door naar einde".to_string()
                                 } else {
@@ -2655,7 +2637,7 @@ impl eframe::App for LoopEditorApp {
                                 let a_sample = (a * sr) as usize;
                                 let b_sample = (b * sr) as usize;
 
-                                let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+                                self.send_cmd(WaveformCommand::Play {
                                     samples: self.waveform_state.samples.clone(),
                                     sample_rate: self.waveform_state.sample_rate,
                                     start_sample: a_sample, // Start met spelen op A
@@ -2877,12 +2859,12 @@ impl eframe::App for LoopEditorApp {
                                 self.waveform_state.seek_pending = Some(saved.loop_a_secs);
                                 self.waveform_state.playhead_frames_after_drag = 15;
 
-                                let _ = self.waveform_cmd_tx.send(WaveformCommand::SetLoopBounds {
+                                self.send_cmd(WaveformCommand::SetLoopBounds {
                                     a_secs: saved.loop_a_secs,
                                     b_secs: saved.loop_b_secs,
                                 });
                                 if self.waveform_has_content {
-                                    let _ = self.waveform_cmd_tx.send(WaveformCommand::Seek {
+                                    self.send_cmd(WaveformCommand::Seek {
                                         pos_secs: saved.loop_a_secs,
                                     });
                                 }

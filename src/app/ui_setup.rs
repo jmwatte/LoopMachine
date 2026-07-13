@@ -413,7 +413,7 @@ impl LoopEditorApp {
         let total_secs = cal_positions.last().copied().unwrap_or(8.0) + 1.0;
         let silent_samples = Arc::new(vec![0.0f32; (sr as f32 * total_secs) as usize]);
 
-        let _ = self.waveform_cmd_tx.send(WaveformCommand::Play {
+        self.send_cmd(WaveformCommand::Play {
             samples: silent_samples,
             sample_rate: sr,
             start_sample: 0,

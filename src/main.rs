@@ -11,6 +11,13 @@ mod waveform;
 mod waveform_player;
 
 fn main() -> Result<(), eframe::Error> {
+    // ── Logger initialisatie (zie RUST_LOG omgevingsvariabele) ──
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .format_timestamp_millis()
+        .init();
+
+    log::info!("LoopMachine gestart");
+
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 600.0])

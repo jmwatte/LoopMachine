@@ -896,7 +896,9 @@ impl ShortcutsConfig {
                         // Als de versie niet matcht, reset naar defaults
                         if config.version != CURRENT_VERSION {
                             let defaults = Self::default();
-                            let _ = defaults.save();
+                            if let Err(e) = defaults.save() {
+                                log::warn!("Kon default shortcuts niet opslaan: {}", e);
+                            }
                             return defaults;
                         }
                         // Merge met defaults: ontbrekende acties krijgen hun default
@@ -995,5 +997,177 @@ impl ShortcutsConfig {
             }
         }
         None
+    }
+}
+
+// ───────────────────────────────────────────────
+// Tests
+// ───────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── KeyBinding tests ──
+
+    #[test]
+    fn test_keybinding_display_simple() {
+        let kb = KeyBinding::new(SerializableKey::Space);
+        assert_eq!(kb.display(), "Space");
+    }
+
+    #[test]
+    fn test_keybinding_display_with_modifiers() {
+        let kb = KeyBinding::new(SerializableKey::S).with_ctrl().with_shift();
+        assert_eq!(kb.display(), "Ctrl+Shift+S");
+    }
+
+    #[test]
+    fn test_keybinding_eq_exact() {
+        let a = KeyBinding::new(SerializableKey::Z).with_ctrl();
+        let b = KeyBinding::new(SerializableKey::Z).with_ctrl();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_keybinding_eq_different_key() {
+        let a = KeyBinding::new(SerializableKey::A).with_ctrl();
+        let b = KeyBinding::new(SerializableKey::B).with_ctrl();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_keybinding_eq_different_modifier() {
+        let a = KeyBinding::new(SerializableKey::X).with_ctrl();
+        let b = KeyBinding::new(SerializableKey::X);
+        assert_ne!(a, b);
+    }
+
+    // ── SerializableKey roundtrip ──
+
+    #[test]
+    fn test_serializable_key_roundtrip() {
+        let keys = [
+            SerializableKey::Space,
+            SerializableKey::Enter,
+            SerializableKey::Escape,
+            SerializableKey::A,
+            SerializableKey::Z,
+            SerializableKey::Num0,
+            SerializableKey::F12,
+            SerializableKey::ArrowLeft,
+            SerializableKey::OpenBracket,
+            SerializableKey::CloseBracket,
+        ];
+
+        for key in &keys {
+            let egui_key: egui::Key = (*key).into();
+            let back: SerializableKey = egui_key.into();
+            assert_eq!(*key, back, "roundtrip mislukt voor {:?}", key);
+        }
+    }
+
+    // ── ShortcutsConfig serde ──
+
+    #[test]
+    fn test_shortcuts_config_default_has_bindings() {
+        let config = ShortcutsConfig::default();
+        assert!(
+            !config.bindings.is_empty(),
+            "default moet bindings bevatten"
+        );
+        assert_eq!(config.version, CURRENT_VERSION);
+    }
+
+    #[test]
+    fn test_shortcuts_config_default_has_playpause() {
+        let config = ShortcutsConfig::default();
+        assert!(config.bindings.contains_key(&ShortcutAction::PlayPause));
+    }
+
+    #[test]
+    fn test_shortcuts_config_binding_for() {
+        let config = ShortcutsConfig::default();
+        let binding = config.binding_for(ShortcutAction::PlayPause);
+        assert!(
+            binding.is_some(),
+            "PlayPause moet een default binding hebben"
+        );
+    }
+
+    #[test]
+    fn test_shortcuts_config_serde_roundtrip() {
+        let config = ShortcutsConfig::default();
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        let restored: ShortcutsConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(config.version, restored.version);
+        assert_eq!(config.bindings.len(), restored.bindings.len());
+
+        for (action, binding) in &config.bindings {
+            let restored_binding = restored.bindings.get(action);
+            assert!(
+                restored_binding.is_some(),
+                "actie {:?} ontbreekt in gerestaureerde config",
+                action
+            );
+            assert_eq!(restored_binding, Some(binding));
+        }
+    }
+
+    #[test]
+    fn test_shortcuts_config_set_binding() {
+        let mut config = ShortcutsConfig::default();
+        let new_binding = KeyBinding::new(SerializableKey::F1).with_ctrl().with_alt();
+
+        let result = config.set_binding(ShortcutAction::PlayPause, new_binding);
+        assert!(result.is_ok());
+
+        let stored = config.binding_for(ShortcutAction::PlayPause);
+        assert_eq!(stored, Some(new_binding).as_ref());
+    }
+
+    #[test]
+    fn test_shortcuts_config_find_conflict() {
+        let mut config = ShortcutsConfig::default();
+        let binding = KeyBinding::new(SerializableKey::P);
+        config
+            .set_binding(ShortcutAction::PlayPause, binding)
+            .unwrap();
+
+        // Zoek conflict met een andere actie die dezelfde binding probeert te gebruiken
+        let conflict = config.find_conflict(
+            &KeyBinding::new(SerializableKey::P),
+            ShortcutAction::ExportLoops,
+        );
+        assert_eq!(conflict, Some(ShortcutAction::PlayPause));
+
+        // Test dat conflict-detectie de exclude respecteert
+        let no_conflict = config.find_conflict(
+            &KeyBinding::new(SerializableKey::P),
+            ShortcutAction::PlayPause,
+        );
+        assert_ne!(no_conflict, Some(ShortcutAction::PlayPause));
+    }
+
+    #[test]
+    fn test_shortcuts_config_reset_action() {
+        let mut config = ShortcutsConfig::default();
+
+        // Cloneer de originele binding
+        let original = config.binding_for(ShortcutAction::Stop).cloned();
+
+        // Verander de binding
+        config
+            .set_binding(
+                ShortcutAction::Stop,
+                KeyBinding::new(SerializableKey::F5).with_ctrl(),
+            )
+            .unwrap();
+
+        // Reset
+        let _ = config.reset_action(ShortcutAction::Stop);
+        let restored = config.binding_for(ShortcutAction::Stop);
+        assert_eq!(restored, original.as_ref());
     }
 }

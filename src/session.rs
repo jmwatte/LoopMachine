@@ -1,4 +1,5 @@
 use crate::shortcuts::ToolbarAction;
+use log;
 use serde::{Deserialize, Serialize};
 
 const SESSION_FILE: &str = "session.json";
@@ -72,8 +73,15 @@ impl SessionState {
             beat_offset_ms,
             toolbar_buttons: Some(toolbar_buttons.to_vec()),
         };
-        if let Ok(json) = serde_json::to_string_pretty(&state) {
-            let _ = std::fs::write(SESSION_FILE, json);
+        match serde_json::to_string_pretty(&state) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(SESSION_FILE, &json) {
+                    log::error!("Kon sessie niet opslaan naar '{}': {}", SESSION_FILE, e);
+                }
+            }
+            Err(e) => {
+                log::error!("Kon sessie niet serialiseren: {}", e);
+            }
         }
     }
 
@@ -82,5 +90,148 @@ impl SessionState {
             Ok(json) => serde_json::from_str(&json).ok(),
             Err(_) => None,
         }
+    }
+}
+
+// ───────────────────────────────────────────────
+// Tests
+// ───────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_state_serde_roundtrip() {
+        let state = SessionState {
+            file_path: Some("/test/song.wav".to_string()),
+            play_position: 42.5,
+            zoom: 150.0,
+            scroll_offset: 10.0,
+            loop_a_secs: Some(5.0),
+            loop_b_secs: Some(30.0),
+            pitch_semitones: 0.0,
+            tempo: 1.0,
+            volume: 0.8,
+            channel_mode: "Mono".to_string(),
+            arr_parse_buf: "ABC".to_string(),
+            last_directory: Some("C:\\Music".to_string()),
+            bpm_threshold: 0.3,
+            playback_latency_ms: 40.0,
+            beat_offset_ms: 0.0,
+            toolbar_buttons: None,
+        };
+
+        let json = serde_json::to_string_pretty(&state).unwrap();
+        let restored: SessionState = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(state.file_path, restored.file_path);
+        assert_eq!(state.play_position, restored.play_position);
+        assert_eq!(state.zoom, restored.zoom);
+        assert_eq!(state.scroll_offset, restored.scroll_offset);
+        assert_eq!(state.loop_a_secs, restored.loop_a_secs);
+        assert_eq!(state.loop_b_secs, restored.loop_b_secs);
+        assert_eq!(state.pitch_semitones, restored.pitch_semitones);
+        assert_eq!(state.tempo, restored.tempo);
+        assert_eq!(state.volume, restored.volume);
+        assert_eq!(state.channel_mode, restored.channel_mode);
+        assert_eq!(state.arr_parse_buf, restored.arr_parse_buf);
+        assert_eq!(state.last_directory, restored.last_directory);
+        assert_eq!(state.bpm_threshold, restored.bpm_threshold);
+        assert_eq!(state.playback_latency_ms, restored.playback_latency_ms);
+        assert_eq!(state.beat_offset_ms, restored.beat_offset_ms);
+        assert_eq!(state.toolbar_buttons, restored.toolbar_buttons);
+    }
+
+    #[test]
+    fn test_session_state_defaults_from_json() {
+        // Alle #[serde(default)] velden ontbreken in JSON
+        let json = r#"{
+            "file_path": "/test.wav",
+            "play_position": 0.0,
+            "zoom": 100.0,
+            "scroll_offset": 0.0,
+            "channel_mode": "Mono",
+            "loop_a_secs": null,
+            "loop_b_secs": null,
+            "pitch_semitones": 0.0,
+            "tempo": 1.0,
+            "volume": 1.0
+        }"#;
+
+        let state: SessionState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.arr_parse_buf, "");
+        assert_eq!(state.last_directory, None);
+        assert_eq!(state.bpm_threshold, 0.0); // default van f32 is 0.0
+        assert_eq!(state.playback_latency_ms, 0.0);
+        assert_eq!(state.beat_offset_ms, 0.0);
+        assert_eq!(state.toolbar_buttons, None);
+    }
+
+    #[test]
+    fn test_session_state_with_toolbar() {
+        let state = SessionState {
+            file_path: None,
+            play_position: 0.0,
+            zoom: 100.0,
+            scroll_offset: 0.0,
+            loop_a_secs: None,
+            loop_b_secs: None,
+            pitch_semitones: 0.0,
+            tempo: 1.0,
+            volume: 1.0,
+            channel_mode: "Stereo".to_string(),
+            arr_parse_buf: String::new(),
+            last_directory: None,
+            bpm_threshold: 0.5,
+            playback_latency_ms: 20.0,
+            beat_offset_ms: 5.0,
+            toolbar_buttons: Some(vec![
+                ToolbarAction::Detect,
+                ToolbarAction::Undo,
+                ToolbarAction::SaveLoop,
+            ]),
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: SessionState = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.bpm_threshold, 0.5);
+        assert_eq!(restored.playback_latency_ms, 20.0);
+        assert_eq!(restored.beat_offset_ms, 5.0);
+        assert_eq!(
+            restored.toolbar_buttons,
+            Some(vec![
+                ToolbarAction::Detect,
+                ToolbarAction::Undo,
+                ToolbarAction::SaveLoop,
+            ])
+        );
+    }
+
+    #[test]
+    fn test_session_state_none_file_path() {
+        let state = SessionState {
+            file_path: None,
+            play_position: 0.0,
+            zoom: 100.0,
+            scroll_offset: 0.0,
+            loop_a_secs: None,
+            loop_b_secs: None,
+            pitch_semitones: 0.0,
+            tempo: 1.0,
+            volume: 1.0,
+            channel_mode: "Mono".to_string(),
+            arr_parse_buf: String::new(),
+            last_directory: None,
+            bpm_threshold: 0.0,
+            playback_latency_ms: 0.0,
+            beat_offset_ms: 0.0,
+            toolbar_buttons: None,
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.file_path, None);
     }
 }

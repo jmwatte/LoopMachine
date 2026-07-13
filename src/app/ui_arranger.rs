@@ -185,7 +185,7 @@ impl LoopEditorApp {
                                                                 let b = (saved.loop_b_secs
                                                                     * sr as f32)
                                                                     as usize;
-                                                                let _ = self.waveform_cmd_tx.send(
+                                                                self.send_cmd(
                                                                     WaveformCommand::Play {
                                                                         samples: self
                                                                             .waveform_state
@@ -397,7 +397,7 @@ impl LoopEditorApp {
             }
         }
         if stop_requested {
-            let _ = self.waveform_cmd_tx.send(WaveformCommand::Stop);
+            self.send_cmd(WaveformCommand::Stop);
             self.arr_current_step = None;
         }
         if needs_save {

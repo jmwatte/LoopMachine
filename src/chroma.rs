@@ -355,7 +355,13 @@ pub fn detect_key_via_cli(
         .map_err(|e| format!("Kan keyfinder-cli niet starten: {}", e))?;
 
     // Opruimen: verwijder temp WAV
-    let _ = std::fs::remove_file(&wav_path);
+    if let Err(e) = std::fs::remove_file(&wav_path) {
+        log::warn!(
+            "Kon temp WAV niet verwijderen '{}': {}",
+            wav_path.display(),
+            e
+        );
+    }
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

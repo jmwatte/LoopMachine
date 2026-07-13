@@ -242,7 +242,7 @@ pub struct SequenceStep {
 const ARRANGEMENTS_FILE: &str = "arrangements.json";
 
 /// Laad arrangementen van schijf.
-/// Laad arrangementen van schijf. Kleurt alle stappen die nog de default grijze kleur
+/// Kleurt alle stappen die nog de default grijze kleur
 /// hebben opnieuw in via de hash van track_path + loop_id.
 pub fn load_arrangements() -> Vec<Arrangement> {
     if let Ok(json) = std::fs::read_to_string(ARRANGEMENTS_FILE) {
@@ -267,8 +267,19 @@ fn fixup_colors(arrangements: &mut [Arrangement]) {
 
 /// Sla arrangementen weg naar schijf.
 pub fn save_arrangements(arrangements: &[Arrangement]) {
-    if let Ok(json) = serde_json::to_string_pretty(arrangements) {
-        let _ = std::fs::write(ARRANGEMENTS_FILE, json);
+    match serde_json::to_string_pretty(arrangements) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(ARRANGEMENTS_FILE, &json) {
+                log::error!(
+                    "Kon arrangementen niet opslaan naar '{}': {}",
+                    ARRANGEMENTS_FILE,
+                    e
+                );
+            }
+        }
+        Err(e) => {
+            log::error!("Kon arrangementen niet serialiseren: {}", e);
+        }
     }
 }
 
@@ -300,4 +311,245 @@ pub fn build_sequence_step(
         end_sample,
         repeats: step.repeats,
     })
+}
+
+// ───────────────────────────────────────────────
+// Tests
+// ───────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── generate_short_id tests ──
+
+    #[test]
+    fn test_generate_short_id_empty() {
+        let ids: Vec<String> = vec![];
+        assert_eq!(generate_short_id(&ids), "a");
+    }
+
+    #[test]
+    fn test_generate_short_id_sequential() {
+        let mut ids: Vec<String> = vec![];
+        for expected in ["a", "b", "c", "d", "e"] {
+            let id = generate_short_id(&ids);
+            assert_eq!(id, expected);
+            ids.push(id);
+        }
+    }
+
+    #[test]
+    fn test_generate_short_id_after_z() {
+        let ids: Vec<String> = ('a'..='z').map(|c| c.to_string()).collect();
+        let next = generate_short_id(&ids);
+        assert_eq!(next, "aa");
+    }
+
+    #[test]
+    fn test_generate_short_id_with_gaps() {
+        let ids = vec!["a".to_string(), "b".to_string(), "aa".to_string()];
+        assert_eq!(generate_short_id(&ids), "c");
+    }
+
+    #[test]
+    fn test_generate_short_id_exhaustive_start() {
+        let ids: Vec<String> = vec![];
+        let first = generate_short_id(&ids);
+        assert_eq!(first, "a", "eerste ID moet 'a' zijn");
+    }
+
+    #[test]
+    fn test_all_possible_ids_count() {
+        let ids = all_possible_ids();
+        assert_eq!(ids.len(), 702); // 26 + 26*26
+        assert_eq!(ids[0], "a");
+        assert_eq!(ids[25], "z");
+        assert_eq!(ids[26], "aa");
+        assert_eq!(ids[701], "zz");
+    }
+
+    #[test]
+    fn test_all_possible_ids_no_duplicates() {
+        let ids = all_possible_ids();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "IDs mogen geen duplicaten bevatten"
+        );
+    }
+
+    // ── parse_arranger_string tests ──
+
+    #[test]
+    fn test_parse_empty() {
+        let result = parse_arranger_string("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_consecutive_letters_become_two_letter_id() {
+        // Opeenvolgende letters worden als 2-letter ID gelezen (abc → ab + c)
+        let result = parse_arranger_string("ABC").unwrap();
+        assert_eq!(result, vec![("ab".to_string(), 1), ("c".to_string(), 1),]);
+    }
+
+    #[test]
+    fn test_parse_with_repeats() {
+        let result = parse_arranger_string("2b3A").unwrap();
+        assert_eq!(result, vec![("b".to_string(), 2), ("a".to_string(), 3),]);
+    }
+
+    #[test]
+    fn test_parse_parentheses_single_letter_inside() {
+        // Binnen haakjes kan alleen 1-letter ID, want ')' is delimiter
+        let result = parse_arranger_string("(a)b").unwrap();
+        assert_eq!(result, vec![("a".to_string(), 1), ("b".to_string(), 1),]);
+    }
+
+    #[test]
+    fn test_parse_number_before_parentheses() {
+        // Getal voor '(' wordt NIET herkend (nummer wordt aan letter gekoppeld)
+        // '(3a)' = 3x a, b = b
+        let result = parse_arranger_string("(3a)b").unwrap();
+        assert_eq!(result, vec![("a".to_string(), 3), ("b".to_string(), 1),]);
+    }
+
+    #[test]
+    fn test_parse_spaces() {
+        let result = parse_arranger_string("A B C").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                ("a".to_string(), 1),
+                ("b".to_string(), 1),
+                ("c".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_repeat_inside_parentheses() {
+        // Herhaling binnen haakjes: (3a)b = 3x a, dan b
+        let result = parse_arranger_string("(3a)b").unwrap();
+        assert_eq!(result, vec![("a".to_string(), 3), ("b".to_string(), 1),]);
+    }
+
+    #[test]
+    fn test_parse_uppercase_is_lowercased() {
+        // 'aBc' wordt 'abc' → 'ab' + 'c'
+        let result = parse_arranger_string("aBc").unwrap();
+        assert_eq!(result, vec![("ab".to_string(), 1), ("c".to_string(), 1),]);
+    }
+
+    #[test]
+    fn test_parse_invalid_char() {
+        let result = parse_arranger_string("AB$C");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_missing_closing_paren() {
+        let result = parse_arranger_string("(ab");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_double_digit_repeats() {
+        let result = parse_arranger_string("12a").unwrap();
+        assert_eq!(result, vec![("a".to_string(), 12)]);
+    }
+
+    #[test]
+    fn test_parse_complex_sequence() {
+        // '(3a)' = 3x a, 'b' = b, 'c' = c, '(2d)' = 2x d, 'e' = e
+        let result = parse_arranger_string("(3a)b c(2d)e").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                ("a".to_string(), 3),
+                ("b".to_string(), 1),
+                ("c".to_string(), 1),
+                ("d".to_string(), 2),
+                ("e".to_string(), 1),
+            ]
+        );
+    }
+
+    // ── hsv_to_rgb tests ──
+
+    #[test]
+    fn test_hsv_to_rgb_red() {
+        // R = 0°, full saturation & value: region 0 → [v, t, p]
+        let [r, g, b] = hsv_to_rgb(0, 255, 255);
+        assert_eq!((r, g, b), (255, 0, 0), "h=0, s=255, v=255");
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_green() {
+        // G = 120°, full saturation & value: region 2 → [p, v, t]
+        let [r, g, b] = hsv_to_rgb(120, 255, 255);
+        assert_eq!((r, g, b), (0, 255, 0), "h=120, s=255, v=255");
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_gray() {
+        // s=0 → always gray regardless of hue
+        let [r, g, b] = hsv_to_rgb(120, 0, 128);
+        assert_eq!((r, g, b), (128, 128, 128));
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_black() {
+        let [r, g, b] = hsv_to_rgb(0, 255, 0);
+        assert_eq!((r, g, b), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_hsv_to_rgb_full_white() {
+        let [r, g, b] = hsv_to_rgb(300, 0, 255);
+        assert_eq!((r, g, b), (255, 255, 255));
+    }
+
+    // ── color_for_arranger tests ──
+
+    #[test]
+    fn test_color_for_arranger_deterministic() {
+        let c1 = color_for_arranger("a", "/track.wav");
+        let c2 = color_for_arranger("a", "/track.wav");
+        assert_eq!(c1, c2, "zelfde input moet dezelfde kleur geven");
+    }
+
+    #[test]
+    fn test_color_for_arranger_different_ids() {
+        let c1 = color_for_arranger("a", "/track.wav");
+        let c2 = color_for_arranger("b", "/track.wav");
+        // Bijna zeker verschillend (hash-based, 702 IDs verdeeld over 360° hue)
+        assert_ne!(
+            c1, c2,
+            "verschillende IDs moeten (bijna altijd) andere kleur geven"
+        );
+    }
+
+    #[test]
+    fn test_color_for_arranger_different_tracks() {
+        let c1 = color_for_arranger("a", "/track1.wav");
+        let c2 = color_for_arranger("a", "/track2.wav");
+        assert_ne!(c1, c2, "zelfde ID in andere track = andere kleur");
+    }
+
+    #[test]
+    fn test_color_for_arranger_bounds() {
+        let [r, g, b] = color_for_arranger("zz", "/some/long/path.wav");
+        assert!(
+            r <= 230 && g <= 230 && b <= 230,
+            "value (V) is 230, dus RGB mag niet hoger zijn: got ({},{},{})",
+            r,
+            g,
+            b
+        );
+    }
 }

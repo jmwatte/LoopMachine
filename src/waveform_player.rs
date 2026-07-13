@@ -656,9 +656,7 @@ impl SequenceSource {
                 if repeats > 1 {
                     self.sequence[step_idx].repeats -= 1;
                     self.read_pos = self.sequence[step_idx].start_sample;
-                    let _ = self
-                        .step_event_tx
-                        .send(WaveformEvent::StepRepeated(step_idx));
+                    let _ = self.step_event_tx.send(WaveformEvent::StepRepeated(step_idx));
                     continue;
                 }
                 if step_idx + 1 < self.sequence.len() {
@@ -668,9 +666,7 @@ impl SequenceSource {
                     self.read_pos = self.sequence[next_idx].start_sample;
                     self.sample_rate = self.sequence[next_idx].sample_rate;
                     self.ts.clear();
-                    let _ = self
-                        .step_event_tx
-                        .send(WaveformEvent::StepChanged(next_idx));
+                    let _ = self.step_event_tx.send(WaveformEvent::StepChanged(next_idx));
                     continue;
                 }
                 // Einde arrangement
