@@ -21,7 +21,14 @@ use eframe::egui::{self, Color32, RichText};
 use egui_file_dialog::FileDialog;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+
+/// Resultaat van een asynchrone bestandslading (audio/video).
+struct LoadFileResult {
+    path: String,
+    result: Result<(Vec<f32>, u32, f32, Option<String>), String>,
+}
 
 // ───────────────────────────────────────────────
 pub struct LoopEditorApp {
@@ -139,6 +146,12 @@ pub struct LoopEditorApp {
     pub mpv_path: Option<String>,
     /// Optionele video-player (mpv) voor video-bestanden.
     pub video_player: Option<crate::video_player::VideoPlayer>,
+
+    // ── Asynchroon laden (voorkomt UI-bevriezing bij grote video's) ──
+    /// True terwijl een bestand wordt gedecodeerd in een achtergrond-thread.
+    pub file_loading: bool,
+    /// Ontvanger voor het resultaat van de laad-thread.
+    file_load_rx: Option<mpsc::Receiver<LoadFileResult>>,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -291,6 +304,8 @@ impl LoopEditorApp {
             ffmpeg_path: None,
             mpv_path: None,
             video_player: None,
+            file_loading: false,
+            file_load_rx: None,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -307,6 +322,10 @@ impl LoopEditorApp {
                 serde_json::from_str(&format!("\"{}\"", session.channel_mode))
                     .unwrap_or(ChannelMode::Mono);
 
+            // Herstel video-paden uit sessie (vóór load_file, zodat ffmpeg beschikbaar is)
+            app.ffmpeg_path = session.ffmpeg_path.clone();
+            app.mpv_path = session.mpv_path.clone();
+
             if let Some(ref path) = session.file_path {
                 if Path::new(path).exists() {
                     app.file_path = path.clone();
@@ -317,9 +336,6 @@ impl LoopEditorApp {
             app.bpm_threshold = session.bpm_threshold;
             app.playback_latency_ms = session.playback_latency_ms;
             app.beat_offset_ms = session.beat_offset_ms;
-            // Herstel video-paden uit sessie
-            app.ffmpeg_path = session.ffmpeg_path.clone();
-            app.mpv_path = session.mpv_path.clone();
             // Herstel toolbar buttons uit sessie
             if let Some(ref buttons) = session.toolbar_buttons {
                 if !buttons.is_empty() {
@@ -435,26 +451,77 @@ impl LoopEditorApp {
             self.waveform_has_content = false;
         }
 
+        self.status_message = format!(
+            "🔄 Bezig met laden: {}...",
+            Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default()
+        );
+        self.status_message_timer = 10 * 60;
+
         let is_video = matches!(
             std::path::Path::new(path)
                 .extension()
                 .and_then(|s| s.to_str()),
             Some("mp4" | "mov" | "avi" | "mkv" | "webm")
         );
-        let result = if is_video {
-            if let Some(ref ffmpeg) = self.ffmpeg_path {
-                crate::waveform::decode_video_audio(path, ffmpeg, self.waveform_state.channel_mode)
-            } else {
-                Err("Video-bestand geladen, maar ffmpeg is niet geconfigureerd.\nGa naar Setup → Video om ffmpeg in te stellen.".to_string())
-            }
-        } else {
-            crate::waveform::decode_audio(path, self.waveform_state.channel_mode)
-        };
+        let path_owned = path.to_string();
+        let ffmpeg_path = self.ffmpeg_path.clone();
+        let channel_mode = self.waveform_state.channel_mode;
 
-        match result {
+        let (tx, rx) = mpsc::channel();
+        self.file_load_rx = Some(rx);
+        self.file_loading = true;
+
+        std::thread::spawn(move || {
+            let result = if is_video {
+                if let Some(ref ffmpeg) = ffmpeg_path {
+                    crate::waveform::decode_video_audio(&path_owned, ffmpeg, channel_mode)
+                } else {
+                    Err("Video-bestand geladen, maar ffmpeg is niet geconfigureerd.\nGa naar Setup → Video om ffmpeg in te stellen.".to_string())
+                }
+            } else {
+                crate::waveform::decode_audio(&path_owned, channel_mode)
+            };
+            let _ = tx.send(LoadFileResult {
+                path: path_owned,
+                result,
+            });
+        });
+    }
+
+    /// Check of een asynchrone bestandslading voltooid is en verwerk het resultaat.
+    /// Aanroepen aan het begin van elke `update()`-frame.
+    pub fn check_file_load(&mut self) {
+        if !self.file_loading {
+            return;
+        }
+        let rx = match self.file_load_rx.as_ref() {
+            Some(rx) => rx,
+            None => {
+                self.file_loading = false;
+                return;
+            }
+        };
+        let load_result = match rx.try_recv() {
+            Ok(res) => res,
+            Err(mpsc::TryRecvError::Empty) => return, // nog niet klaar
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.file_loading = false;
+                self.file_load_rx = None;
+                self.waveform_state.error =
+                    Some("Onverwachte fout tijdens laden (thread gestopt)".to_string());
+                return;
+            }
+        };
+        self.file_loading = false;
+        self.file_load_rx = None;
+
+        let path = &load_result.path;
+        match load_result.result {
             Ok((samples, sample_rate, duration_secs, warning)) => {
                 self.waveform_state.path = Some(path.to_string());
-                // Bouw waveform summary voor snelle weergave bij elke zoom
                 let summary = crate::waveform::WaveformSummary::build(&samples);
                 self.waveform_state.samples = Arc::new(samples);
                 self.waveform_state.sample_rate = sample_rate;
@@ -940,6 +1007,9 @@ impl LoopEditorApp {
 
 impl eframe::App for LoopEditorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check of een asynchrone bestandslading voltooid is
+        self.check_file_load();
+
         self.handle_waveform_events(ctx);
         self.housekeeping(ctx);
         self.handle_keyboard_shortcuts(ctx);
@@ -954,6 +1024,18 @@ impl eframe::App for LoopEditorApp {
             let panel_width = ui.available_width().max(100.0);
             self.last_panel_width = panel_width;
             ui.separator();
+
+            // ── Laad-indicator ──
+            if self.file_loading {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().color(Color32::from_rgb(100, 200, 255)));
+                    ui.label(
+                        RichText::new("🔄 Bezig met decoderen…")
+                            .size(13.0)
+                            .color(Color32::from_rgb(100, 200, 255)),
+                    );
+                });
+            }
 
             // ── Foutmelding ──
             if let Some(ref err) = self.waveform_state.error {

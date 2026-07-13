@@ -148,26 +148,29 @@ pub fn migrate_if_needed() {
         let new_path = data_dir.join(file);
         let mut found = false;
 
+        // Als het doelbestand al bestaat, is migratie niet nodig
+        if new_path.exists() {
+            continue;
+        }
+
         for dir in &search_dirs {
             let old_path = Path::new(dir).join(file);
             if old_path.exists() {
-                if *file == "session.json" || !new_path.exists() {
-                    log::info!(
-                        "Migreer '{}' naar '{}'",
-                        old_path.display(),
-                        new_path.display()
-                    );
-                    if let Err(e) = std::fs::copy(&old_path, &new_path) {
-                        log::warn!("Kon '{}' niet migreren: {}", file, e);
-                    } else {
-                        found = true;
-                        break; // Eerste gevonden = beste
-                    }
+                log::info!(
+                    "Migreer '{}' naar '{}'",
+                    old_path.display(),
+                    new_path.display()
+                );
+                if let Err(e) = std::fs::copy(&old_path, &new_path) {
+                    log::warn!("Kon '{}' niet migreren: {}", file, e);
+                } else {
+                    found = true;
+                    break; // Eerste gevonden = beste
                 }
             }
         }
 
-        if !found && *file == "session.json" {
+        if !found {
             log::warn!(
                 "Geen oude '{}' gevonden in target/release, target/debug of .",
                 file
