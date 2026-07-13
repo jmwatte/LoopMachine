@@ -1191,9 +1191,14 @@ impl LoopEditorApp {
         }
     }
 }
-impl eframe::App for LoopEditorApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ── Verwerk waveform audio events ──
+
+// ───────────────────────────────────────────────
+// Hulpmethodes voor update() — event-loop, shortcuts, en CentralPanel
+// ───────────────────────────────────────────────
+
+impl LoopEditorApp {
+    /// Verwerk alle binnenkomende events van de audio-thread.
+    fn handle_waveform_events(&mut self, ctx: &egui::Context) {
         while let Ok(event) = self.waveform_event_rx.try_recv() {
             match event {
                 WaveformEvent::Playing => {
@@ -1292,7 +1297,10 @@ impl eframe::App for LoopEditorApp {
                 }
             }
         }
+    }
 
+    /// Verval statusmelding, kalibratie-flits, en repaint-aanvragen.
+    fn housekeeping(&mut self, ctx: &egui::Context) {
         // Verval statusmelding na 5 seconden
         if self.status_message_timer > 0 {
             self.status_message_timer -= 1;
@@ -1308,7 +1316,10 @@ impl eframe::App for LoopEditorApp {
         if self.waveform_is_playing || self.calibration_active {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+    }
 
+    /// Verwerk toetsenbord shortcuts (behalve als tekstveld focus heeft).
+    fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         // ── Keyboard Shortcuts ──
         let is_text_focused = ctx.memory(|mem| mem.focused().is_some());
         if let Some(action) = self.listening_for_action {
@@ -2212,7 +2223,10 @@ impl eframe::App for LoopEditorApp {
                 }
             }
         }
-        // ── Drag & drop bestanden ──
+    }
+
+    /// Verwerk drag-and-drop van audiobestanden.
+    fn handle_drag_drop(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if !dropped.is_empty() {
             if let Some(path) = dropped
@@ -2224,6 +2238,15 @@ impl eframe::App for LoopEditorApp {
                 self.load_file(path);
             }
         }
+    }
+}
+
+impl eframe::App for LoopEditorApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_waveform_events(ctx);
+        self.housekeeping(ctx);
+        self.handle_keyboard_shortcuts(ctx);
+        self.handle_drag_drop(ctx);
 
         // ── Top paneel met bestand openen ──
         egui::TopBottomPanel::top("file_toolbar").show(ctx, |ui| {
