@@ -65,6 +65,8 @@ Kies hoe stereobestanden naar mono worden gemixed:
 | Inzoomen | `Ctrl+0` of knop 🔍+ |
 | Uitzoomen | `Ctrl+Shift+0` of knop 🔍− |
 | Reset | `Ctrl+R` of knop "⟲ Reset zoom/scroll" |
+| Scrollen: volgend deel | `PageDown` — verspring één paginabreedte vooruit op huidig zoomniveau |
+| Scrollen: vorig deel | `PageUp` — verspring één paginabreedte terug op huidig zoomniveau |
 
 ---
 
@@ -398,6 +400,8 @@ Als je een toets probeert te koppelen die al in gebruik is, wordt een waarschuwi
 | Inzoomen | `Ctrl+0` |
 | Uitzoomen | `Ctrl+Shift+0` |
 | Reset zoom | `Ctrl+R` |
+| Scrollen: volgend deel | `PageDown` |
+| Scrollen: vorig deel | `PageUp` |
 | Shortcuts help | `F1` |
 
 #### File

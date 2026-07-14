@@ -942,6 +942,34 @@ impl LoopEditorApp {
                 self.waveform_state.scroll_offset = 0.0;
             }
 
+            // ScrollForward / ScrollBackward — pagineren op huidig zoomniveau
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ScrollForward, &ctx.input(|i| i.clone()))
+            {
+                let panel_width = self.last_panel_width.max(100.0);
+                let page_secs = if self.waveform_state.zoom > 0.0 {
+                    panel_width / self.waveform_state.zoom
+                } else {
+                    10.0
+                };
+                self.waveform_state.scroll_offset = (self.waveform_state.scroll_offset + page_secs)
+                    .min((self.waveform_state.duration_secs - page_secs).max(0.0));
+            }
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::ScrollBackward, &ctx.input(|i| i.clone()))
+            {
+                let panel_width = self.last_panel_width.max(100.0);
+                let page_secs = if self.waveform_state.zoom > 0.0 {
+                    panel_width / self.waveform_state.zoom
+                } else {
+                    10.0
+                };
+                self.waveform_state.scroll_offset =
+                    (self.waveform_state.scroll_offset - page_secs).max(0.0);
+            }
+
             // OpenFile
             if self
                 .shortcuts

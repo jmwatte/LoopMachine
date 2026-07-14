@@ -263,6 +263,10 @@ pub enum ShortcutAction {
     MarkerPrev,
     MarkerNext,
 
+    // Scroll (pagineren op zoomniveau)
+    ScrollForward,
+    ScrollBackward,
+
     // Export
     ExportLoops,
 }
@@ -307,6 +311,8 @@ impl ShortcutAction {
             Self::SnapLoopLeft => "Snap loop to nearest marker left",
             Self::SnapLoopRight => "Snap loop to nearest marker right",
             Self::MarkerPrev => "Seek playhead to previous marker",
+            Self::ScrollForward => "Scroll forward one page",
+            Self::ScrollBackward => "Scroll backward one page",
             Self::MarkerNext => "Seek playhead to next marker",
             Self::Detect => "Detect key & BPM",
             Self::ExtendBeats => "Extend beats across track",
@@ -351,7 +357,12 @@ impl ShortcutAction {
             | Self::DeleteNearestMarker
             | Self::MarkerPrev
             | Self::MarkerNext => "Markers",
-            Self::ZoomIn | Self::ZoomOut | Self::ResetZoom | Self::ShowShortcuts => "View",
+            Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ResetZoom
+            | Self::ShowShortcuts
+            | Self::ScrollForward
+            | Self::ScrollBackward => "View",
             Self::OpenFile => "File",
             Self::Undo | Self::Redo | Self::RestartLoop => "Edit",
             Self::Detect
@@ -408,6 +419,8 @@ impl ShortcutAction {
             Self::HalveLoopLength,
             Self::SnapLoopLeft,
             Self::SnapLoopRight,
+            Self::ScrollForward,
+            Self::ScrollBackward,
             Self::ExportLoops,
             Self::Detect,
             Self::ExtendBeats,
@@ -549,6 +562,8 @@ pub enum SerializableKey {
     F10,
     F11,
     F12,
+    PageUp,
+    PageDown,
 }
 
 impl SerializableKey {
@@ -613,6 +628,8 @@ impl SerializableKey {
             Self::F10 => "F10",
             Self::F11 => "F11",
             Self::F12 => "F12",
+            Self::PageUp => "PageUp",
+            Self::PageDown => "PageDown",
         }
     }
 }
@@ -680,6 +697,8 @@ impl From<egui::Key> for SerializableKey {
             egui::Key::F10 => SerializableKey::F10,
             egui::Key::F11 => SerializableKey::F11,
             egui::Key::F12 => SerializableKey::F12,
+            egui::Key::PageUp => SerializableKey::PageUp,
+            egui::Key::PageDown => SerializableKey::PageDown,
             _ => SerializableKey::Space, // Fallback
         }
     }
@@ -747,6 +766,8 @@ impl From<SerializableKey> for egui::Key {
             SerializableKey::F10 => egui::Key::F10,
             SerializableKey::F11 => egui::Key::F11,
             SerializableKey::F12 => egui::Key::F12,
+            SerializableKey::PageUp => egui::Key::PageUp,
+            SerializableKey::PageDown => egui::Key::PageDown,
         }
     }
 }
@@ -927,6 +948,16 @@ impl Default for ShortcutsConfig {
         bindings.insert(
             ShortcutAction::SnapLoopRight,
             KeyBinding::new(SerializableKey::Q),
+        );
+
+        // Scroll (pagineren)
+        bindings.insert(
+            ShortcutAction::ScrollForward,
+            KeyBinding::new(SerializableKey::PageDown),
+        );
+        bindings.insert(
+            ShortcutAction::ScrollBackward,
+            KeyBinding::new(SerializableKey::PageUp),
         );
 
         // Tools (geen default shortcuts, maar wel aanpasbaar)
