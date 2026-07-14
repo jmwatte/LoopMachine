@@ -139,6 +139,10 @@ pub struct LoopEditorApp {
     /// Toon het toolbar-editor venster
     pub show_toolbar_editor: bool,
 
+    // ── Follow playhead ──
+    /// Als true: playhead blijft gecentreerd tijdens afspelen, waveform scrollt mee.
+    pub follow_playhead: bool,
+
     // ── Video (ffmpeg/mpv) ──
     /// Pad naar ffmpeg executable.
     pub ffmpeg_path: Option<String>,
@@ -306,6 +310,7 @@ impl LoopEditorApp {
             video_player: None,
             file_loading: false,
             file_load_rx: None,
+            follow_playhead: false,
         };
 
         // Laad sessie (vorige file, positie, etc.)
@@ -968,6 +973,25 @@ impl LoopEditorApp {
         self.status_message_timer = 2 * 60;
     }
 
+    /// Als `follow_playhead` aan staat en audio speelt: centreer de playhead.
+    fn update_follow_playhead(&mut self) {
+        if !self.follow_playhead || !self.waveform_is_playing {
+            return;
+        }
+        let panel_width = self.last_panel_width.max(100.0);
+        if panel_width <= 0.0 || self.waveform_state.zoom <= 0.0 {
+            return;
+        }
+        let visible_secs = panel_width / self.waveform_state.zoom;
+        if visible_secs <= 0.0 {
+            return;
+        }
+        let max_scroll = (self.waveform_state.duration_secs - visible_secs).max(0.0);
+        let target_scroll =
+            (self.waveform_play_position - visible_secs / 2.0).clamp(0.0, max_scroll);
+        self.waveform_state.scroll_offset = target_scroll;
+    }
+
     /// Centreer de viewport op de A-B loop, of op de playhead als er geen loop is.
     fn center_view_on_loop(&mut self, viewport_width_px: f32) {
         if viewport_width_px <= 0.0 || self.waveform_state.duration_secs <= 0.0 {
@@ -992,16 +1016,19 @@ impl LoopEditorApp {
             }
         }
 
-        // Geen geldige A-B loop → centreer op de playhead
-        let target_zoom = (viewport_width_px * 0.6) / 10.0; // ~10 sec zichtbaar
-        self.waveform_state.zoom = target_zoom.clamp(5.0, 5000.0);
+        self.center_view_on_playhead();
+    }
 
+    /// Centreer de viewport op de huidige playhead-positie.
+    fn center_view_on_playhead(&mut self) {
+        let viewport_width_px = self.last_panel_width.max(100.0);
+        if viewport_width_px <= 0.0 || self.waveform_state.zoom <= 0.0 {
+            return;
+        }
         let visible_secs = viewport_width_px / self.waveform_state.zoom;
-        let pos = self
-            .waveform_play_position
-            .clamp(0.0, self.waveform_state.duration_secs);
         let max_scroll = (self.waveform_state.duration_secs - visible_secs).max(0.0);
-        self.waveform_state.scroll_offset = (pos - visible_secs / 2.0).clamp(0.0, max_scroll);
+        self.waveform_state.scroll_offset =
+            (self.waveform_play_position - visible_secs / 2.0).clamp(0.0, max_scroll);
     }
 }
 
@@ -1011,6 +1038,7 @@ impl eframe::App for LoopEditorApp {
         self.check_file_load();
 
         self.handle_waveform_events(ctx);
+        self.update_follow_playhead();
         self.housekeeping(ctx);
         self.handle_keyboard_shortcuts(ctx);
         self.handle_drag_drop(ctx);

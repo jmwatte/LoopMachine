@@ -266,6 +266,7 @@ pub enum ShortcutAction {
     // Scroll (pagineren op zoomniveau)
     ScrollForward,
     ScrollBackward,
+    ToggleFollowPlayhead,
 
     // Export
     ExportLoops,
@@ -313,6 +314,7 @@ impl ShortcutAction {
             Self::MarkerPrev => "Seek playhead to previous marker",
             Self::ScrollForward => "Scroll forward one page",
             Self::ScrollBackward => "Scroll backward one page",
+            Self::ToggleFollowPlayhead => "Toggle follow playhead mode",
             Self::MarkerNext => "Seek playhead to next marker",
             Self::Detect => "Detect key & BPM",
             Self::ExtendBeats => "Extend beats across track",
@@ -362,7 +364,8 @@ impl ShortcutAction {
             | Self::ResetZoom
             | Self::ShowShortcuts
             | Self::ScrollForward
-            | Self::ScrollBackward => "View",
+            | Self::ScrollBackward
+            | Self::ToggleFollowPlayhead => "View",
             Self::OpenFile => "File",
             Self::Undo | Self::Redo | Self::RestartLoop => "Edit",
             Self::Detect
@@ -421,6 +424,7 @@ impl ShortcutAction {
             Self::SnapLoopRight,
             Self::ScrollForward,
             Self::ScrollBackward,
+            Self::ToggleFollowPlayhead,
             Self::ExportLoops,
             Self::Detect,
             Self::ExtendBeats,
@@ -958,6 +962,10 @@ impl Default for ShortcutsConfig {
         bindings.insert(
             ShortcutAction::ScrollBackward,
             KeyBinding::new(SerializableKey::PageUp),
+        );
+        bindings.insert(
+            ShortcutAction::ToggleFollowPlayhead,
+            KeyBinding::new(SerializableKey::F),
         );
 
         // Tools (geen default shortcuts, maar wel aanpasbaar)

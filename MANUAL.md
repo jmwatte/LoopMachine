@@ -67,6 +67,7 @@ Kies hoe stereobestanden naar mono worden gemixed:
 | Reset | `Ctrl+R` of knop "⟲ Reset zoom/scroll" |
 | Scrollen: volgend deel | `PageDown` — verspring één paginabreedte vooruit op huidig zoomniveau |
 | Scrollen: vorig deel | `PageUp` — verspring één paginabreedte terug op huidig zoomniveau |
+| Follow playhead aan/uit | `F` — playhead blijft gecentreerd tijdens afspelen, waveform scrollt mee |
 
 ---
 
@@ -402,6 +403,7 @@ Als je een toets probeert te koppelen die al in gebruik is, wordt een waarschuwi
 | Reset zoom | `Ctrl+R` |
 | Scrollen: volgend deel | `PageDown` |
 | Scrollen: vorig deel | `PageUp` |
+| Follow playhead aan/uit | `F` |
 | Shortcuts help | `F1` |
 
 #### File

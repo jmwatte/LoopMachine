@@ -812,6 +812,25 @@ impl LoopEditorApp {
                 }
             }
 
+            // ── Toggle follow playhead ──
+            if self.shortcuts.is_pressed(
+                ShortcutAction::ToggleFollowPlayhead,
+                &ctx.input(|i| i.clone()),
+            ) {
+                self.follow_playhead = !self.follow_playhead;
+                self.status_message = if self.follow_playhead {
+                    "📍 Follow playhead: AAN — playhead blijft gecentreerd tijdens afspelen"
+                } else {
+                    "📍 Follow playhead: UIT"
+                }
+                .to_string();
+                self.status_message_timer = 3 * 60;
+                // Bij inschakelen: centreer meteen
+                if self.follow_playhead {
+                    self.center_view_on_playhead();
+                }
+            }
+
             // ── ↑/↓ Rewind/Forward 2 seconden ──
             if self.waveform_state.path.is_some() {
                 let mut seek_delta: Option<f32> = None;
