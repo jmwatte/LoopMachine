@@ -96,6 +96,10 @@ pub struct LoopEditorApp {
     pub file_dialog: FileDialog,
     /// Laatst gebruikte directory voor file dialog
     pub file_dialog_last_dir: Option<String>,
+    /// Track-index waarvoor een relink-dialoog open is (missend bestand).
+    pending_relink_track: Option<usize>,
+    /// Bestandsdialoog om een missende track naar een nieuw pad te herlinken.
+    relink_dialog: FileDialog,
 
     // Arranger
     pub show_arranger: bool,
@@ -271,6 +275,31 @@ impl LoopEditorApp {
                 )
                 .default_file_filter("Audio / Video"),
             file_dialog_last_dir: None,
+            pending_relink_track: None,
+            relink_dialog: FileDialog::new()
+                .add_file_filter(
+                    "Audio / Video",
+                    std::sync::Arc::new(|p: &std::path::Path| {
+                        matches!(
+                            p.extension().and_then(|s| s.to_str()),
+                            Some(
+                                "mp3"
+                                    | "wav"
+                                    | "flac"
+                                    | "ogg"
+                                    | "m4a"
+                                    | "aac"
+                                    | "wma"
+                                    | "mp4"
+                                    | "mov"
+                                    | "avi"
+                                    | "mkv"
+                                    | "webm"
+                            )
+                        )
+                    }),
+                )
+                .title("Kies de nieuwe locatie van het bestand"),
             show_arranger: false,
             active_arrangement: None,
             arrangements: crate::arrangement::load_arrangements(),
@@ -857,6 +886,49 @@ impl LoopEditorApp {
             b_secs: b,
         });
         self.sync_video_loop();
+    }
+
+    /// Herlink een missende track naar een nieuw pad en sla de bibliotheek op.
+    /// Als de wijziging alleen een stationsletter-swap is (bijv. H: → L:),
+    /// wordt dezelfde swap ook op andere missende tracks met die stationsletter
+    /// toegepast.
+    fn apply_relink(&mut self, ti: usize, new_path: &str) {
+        if ti >= self.library.tracks.len() {
+            return;
+        }
+        let old_path = self.library.tracks[ti].track_path.clone();
+        self.library.tracks[ti].track_path = new_path.to_string();
+        let mut fixed = 1;
+
+        // Stationsletter-swap doorvoeren op andere missende tracks met dezelfde prefix
+        if let (Some((old_pre, old_drive, _)), Some((new_pre, new_drive, _))) = (
+            crate::loops::split_drive(&old_path),
+            crate::loops::split_drive(new_path),
+        ) {
+            if old_drive != new_drive {
+                for track in self.library.tracks.iter_mut() {
+                    if track.track_path == old_path {
+                        continue;
+                    }
+                    if Path::new(&track.track_path).exists() {
+                        continue;
+                    }
+                    if let Some((pre, drv, rest)) = crate::loops::split_drive(&track.track_path) {
+                        if pre == old_pre && drv == old_drive {
+                            let candidate = format!("{}{}:{}", new_pre, new_drive, rest);
+                            if Path::new(&candidate).exists() {
+                                track.track_path = candidate;
+                                fixed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        crate::loops::save_library(&self.library);
+        self.status_message = format!("🔗 Track herlinkt — {} track(s) bijgewerkt", fixed);
+        self.status_message_timer = 4 * 60;
     }
 
     /// Speel een heel arrangement af (fire & forget naar audio-thread).
@@ -1822,6 +1894,22 @@ impl eframe::App for LoopEditorApp {
                 self.file_dialog_last_dir = Some(dir.clone());
                 self.file_dialog.config_mut().initial_directory = parent.to_path_buf();
                 self.save_session();
+            }
+        }
+
+        // ── Relink-dialog (missende track naar nieuw pad) ──
+        self.relink_dialog.update(ctx);
+        if let Some(path) = self.relink_dialog.take_selected() {
+            let raw = path.to_string_lossy();
+            // Strip \? prefix dat Windows file dialogs soms toevoegen
+            let prefix = "\\?\\";
+            let path_str = if raw.starts_with(prefix) {
+                raw[prefix.len()..].to_string()
+            } else {
+                raw.to_string()
+            };
+            if let Some(ti) = self.pending_relink_track.take() {
+                self.apply_relink(ti, &path_str);
             }
         }
 

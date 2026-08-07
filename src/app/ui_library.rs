@@ -1,4 +1,5 @@
 use eframe::egui::{self, Color32, RichText};
+use std::path::Path;
 
 use crate::app::LoopEditorApp;
 use crate::arrangement::color_for_arranger;
@@ -20,6 +21,8 @@ impl LoopEditorApp {
                     let mut delete_loop_op: Option<(usize, usize)> = None;
                     let _delete_track_op: Option<usize> = None;
                     let mut load_loop_op: Option<(usize, usize)> = None;
+                    let mut relink_op: Option<usize> = None;
+                    let mut drive_swap_op: Option<(usize, String)> = None;
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for (ti, track) in self.library.tracks.iter().enumerate() {
@@ -46,6 +49,50 @@ impl LoopEditorApp {
                                     },
                                 );
                             });
+
+                            // ── Missend bestand? Bied relink aan ──
+                            if !Path::new(&track.track_path).exists() {
+                                ui.indent(egui::Id::new(("relink", ti)), |ui| {
+                                    ui.colored_label(
+                                        Color32::from_rgb(255, 100, 100),
+                                        "⛔ Bestand niet gevonden",
+                                    );
+                                    ui.label(
+                                        RichText::new(&track.track_path)
+                                            .size(10.0)
+                                            .color(Color32::from_gray(140)),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .small_button("🔗 Relink…")
+                                            .on_hover_text("Kies het nieuwe pad voor dit bestand")
+                                            .clicked()
+                                        {
+                                            relink_op = Some(ti);
+                                        }
+                                        let cands =
+                                            crate::loops::drive_swap_candidates(&track.track_path);
+                                        if cands.len() == 1 {
+                                            if let Some(cand) = cands.first() {
+                                                if let Some((_, drive, _)) =
+                                                    crate::loops::split_drive(cand)
+                                                {
+                                                    if ui
+                                                        .small_button(format!(
+                                                            "💡 Gebruik station {}",
+                                                            drive
+                                                        ))
+                                                        .on_hover_text(cand.clone())
+                                                        .clicked()
+                                                    {
+                                                        drive_swap_op = Some((ti, cand.clone()));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                });
+                            }
 
                             // Sub-lijst loops
                             if !track.loops.is_empty() {
@@ -181,6 +228,15 @@ impl LoopEditorApp {
                             self.status_message = "Track geladen".to_string();
                             self.status_message_timer = 3 * 60;
                         }
+                    }
+
+                    // ── Verwerk relink-operaties ──
+                    if let Some(ti) = relink_op {
+                        self.pending_relink_track = Some(ti);
+                        self.relink_dialog.select_file();
+                    }
+                    if let Some((ti, new_path)) = drive_swap_op {
+                        self.apply_relink(ti, &new_path);
                     }
                 }
             });

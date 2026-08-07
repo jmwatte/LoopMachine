@@ -294,6 +294,49 @@ pub fn assign_short_ids(lib: &mut Library) -> bool {
 }
 
 // ───────────────────────────────────────────────
+// Pad-helpers (relinken van missende tracks)
+// ───────────────────────────────────────────────
+
+/// Splits een pad op in (win-prefix, stationsletter, rest).
+/// Voorbeelden:
+///   "H:\\music\\a.flac"         → ("", 'H', "\\music\\a.flac")
+///   "\\\\?\\H:\\music\\a.flac" → ("\\\\?\\", 'H', "\\music\\a.flac")
+pub(crate) fn split_drive(path: &str) -> Option<(String, char, String)> {
+    let (pre, rest) = match path.strip_prefix("\\\\?\\") {
+        Some(r) => ("\\\\?\\".to_string(), r),
+        None => (String::new(), path),
+    };
+    let bytes = rest.as_bytes();
+    if bytes.len() < 2 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
+        return None;
+    }
+    Some((
+        pre,
+        bytes[0].to_ascii_uppercase() as char,
+        rest[2..].to_string(),
+    ))
+}
+
+/// Vind bestaande bestanden waarbij alleen de stationsletter is gewijzigd
+/// (bijv. H: → L:). Retourneert alle gevonden kandidaten.
+pub(crate) fn drive_swap_candidates(path: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some((pre, drive, rest)) = split_drive(path) {
+        for letter in b'A'..=b'Z' {
+            let l = letter as char;
+            if l == drive {
+                continue;
+            }
+            let candidate = format!("{}{}:{}", pre, l, rest);
+            if Path::new(&candidate).exists() {
+                out.push(candidate);
+            }
+        }
+    }
+    out
+}
+
+// ───────────────────────────────────────────────
 // Oude struct (alleen voor migratie)
 // ───────────────────────────────────────────────
 
@@ -539,6 +582,23 @@ mod tests {
         // temp-map (andere parallelle tests gebruiken die ook).
         let _ = fs::remove_file(&lib_path);
         let _ = fs::remove_file(&old_path);
+    }
+
+    #[test]
+    fn test_split_drive() {
+        assert_eq!(
+            split_drive("H:\\music\\a.flac"),
+            Some((String::new(), 'H', "\\music\\a.flac".to_string()))
+        );
+        assert_eq!(
+            split_drive("\\\\?\\H:\\music\\a.flac"),
+            Some(("\\\\?\\".to_string(), 'H', "\\music\\a.flac".to_string()))
+        );
+        // Kleine letters worden hoofdletters
+        assert_eq!(split_drive("l:\\muziek\\b.mp3").unwrap().1, 'L');
+        // Geen stationsletter → None
+        assert_eq!(split_drive("/mnt/muziek/a.flac"), None);
+        assert_eq!(split_drive("relative\\a.flac"), None);
     }
 
     #[test]
