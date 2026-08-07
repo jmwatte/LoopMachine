@@ -5,6 +5,25 @@ use serde::{Deserialize, Serialize};
 /// Bepaal de data-directory: %APPDATA%/LoopMachine (Windows) of ~/.local/share/loopmachine (overig).
 /// Alle data-bestanden worden hier opgeslagen, onafhankelijk van waar de executable staat.
 pub fn data_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        // Tests mogen NOOIT naar de echte data-map schrijven: sommige geteste
+        // functies (bv. save_library via assign_short_ids, shortcuts save())
+        // schrijven data terug naar schijf. Gebruik daarom een gedeelde
+        // temp-map, zodat parallelle tests elkaar niet kunnen overschrijven
+        // via de process-globale omgevingsvariabele.
+        let dir =
+            std::env::temp_dir().join(format!("loopmachine_test_data_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        return dir;
+    }
+    #[cfg(not(test))]
+    data_dir_real()
+}
+
+/// Data-directory voor normale runs (niet-test).
+#[cfg(not(test))]
+fn data_dir_real() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {

@@ -186,7 +186,9 @@ pub fn load_library() -> Library {
     match std::fs::read_to_string(library_path()) {
         Ok(json) => match serde_json::from_str::<Library>(&json) {
             Ok(mut lib) => {
-                assign_short_ids(&mut lib);
+                if assign_short_ids(&mut lib) {
+                    save_library(&lib);
+                }
                 return lib;
             }
             Err(e) => {
@@ -259,7 +261,10 @@ pub fn save_library(library: &Library) {
 }
 
 /// Ken aan alle loops zonder short_id een unieke ID toe.
-pub fn assign_short_ids(lib: &mut Library) {
+/// Geeft `true` terug als er iets gewijzigd is. Schrijft NIET zelf naar schijf:
+/// de aanroeper bepaalt of opslaan nodig is. Zo kunnen tests dit veilig
+/// aanroepen zonder de echte library.json te overschrijven.
+pub fn assign_short_ids(lib: &mut Library) -> bool {
     let mut changed = false;
     for track in &mut lib.tracks {
         // Reset: verzamel alle IDs en vervang dubbele
@@ -285,9 +290,7 @@ pub fn assign_short_ids(lib: &mut Library) {
             }
         }
     }
-    if changed {
-        save_library(lib);
-    }
+    changed
 }
 
 // ───────────────────────────────────────────────
@@ -486,17 +489,12 @@ mod tests {
     #[test]
     fn test_library_migration_creates_short_ids() {
         use std::fs;
-        use std::path::PathBuf;
 
-        // Redirect APPDATA naar een tijdelijke map zodat we niet naar %APPDATA% schrijven
-        let tmp = std::env::temp_dir().join("loopmachine_test_migration");
-        let _ = fs::create_dir_all(&tmp);
-        std::env::set_var("APPDATA", &tmp);
-
-        // Bepaal paden via data_dir() zodat load_library() ze kan vinden
+        // In tests wijst data_dir() naar een temp-map (zie session.rs), dus
+        // hier wordt nooit naar de echte %APPDATA% geschreven.
         let data = crate::session::data_dir();
-        let lib_path: PathBuf = data.join("library.json");
-        let old_path: PathBuf = data.join("loops.json");
+        let lib_path = data.join("library.json");
+        let old_path = data.join("loops.json");
 
         // Opruimen
         let _ = fs::remove_file(&lib_path);
@@ -537,10 +535,10 @@ mod tests {
             "library.json moet aangemaakt zijn na migratie"
         );
 
-        // Cleanup
+        // Cleanup: verwijder alleen de eigen bestanden, niet de gedeelde
+        // temp-map (andere parallelle tests gebruiken die ook).
         let _ = fs::remove_file(&lib_path);
         let _ = fs::remove_file(&old_path);
-        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
