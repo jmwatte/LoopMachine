@@ -28,6 +28,14 @@
 | FLAC    | `.flac`  |
 | OGG     | `.ogg`   |
 | M4A/AAC | `.m4a`   |
+| WMA     | `.wma`   |
+| MP4     | `.mp4`   |
+| MOV     | `.mov`   |
+| AVI     | `.avi`   |
+| MKV     | `.mkv`   |
+| WebM    | `.webm`  |
+
+> Video-bestanden (`.mp4`/`.mov`/`.avi`/`.mkv`/`.webm`) vereisen ffmpeg — zie hoofdstuk 3. Video.
 
 ### Kanaalmodus
 Kies hoe stereobestanden naar mono worden gemixed:
@@ -41,7 +49,58 @@ Kies hoe stereobestanden naar mono worden gemixed:
 
 ---
 
-## 3. Waveform & Playback
+## 3. Video
+
+LoopMachine kan ook **video-bestanden** laden en bewerken. De audio wordt uit de
+video gehaald en in de waveform getoond; het beeld verschijnt optioneel in een
+apart mpv-venster dat synchroon loopt met de audio.
+
+### Vereisten
+Voor video zijn twee losse programma's nodig, die je **eenmalig** instelt in
+⚙ **Setup → Video**:
+
+| Programma | Pad-veld | Doel |
+|-----------|----------|------|
+| **ffmpeg** | `ffmpeg:` | Haalt de audiotrack uit de video (**verplicht**) |
+| **mpv**   | `mpv:`    | Toont het beeld in een apart venster (optioneel) |
+
+- **ffmpeg is verplicht** om een video te openen. Zonder ffmpeg verschijnt de
+  melding "Video-bestand geladen, maar ffmpeg is niet geconfigureerd".
+- **mpv is optioneel**: zonder mpv kun je de audio van de video wél laden en
+  bewerken, maar zie je geen beeld.
+- Laat een veld leeg om die functie uit te schakelen. Voorbeeld:
+  `C:\Tools\ffmpeg.exe` en `C:\Tools\mpv.exe`.
+
+### Video openen
+1. Stel de paden in via ⚙ **Setup → Video** (zie boven).
+2. Open de video zoals elk ander bestand: 📂 Open bestand (`Ctrl+O`) of sleep
+   hem in het venster.
+3. De audiotrack wordt gedecodeerd en in de waveform getoond.
+4. Klik **"🎬 Toon video"** in de actie-werkbalk om het beeld in mpv te openen.
+   Deze knop verschijnt alleen bij video-bestanden waarvan mpv is ingesteld.
+5. Klik nogmaals op **🎬** om de video-speler te sluiten.
+
+### Synchronisatie
+De video-speler volgt de editor automatisch:
+
+| Editor-actie | Effect in mpv |
+|--------------|---------------|
+| Play / Pause | Video start of stopt mee |
+| Seek (klik op waveform, `←`/`→`) | Video springt naar dezelfde positie |
+| Tempo aanpassen | Video speelt op dezelfde snelheid |
+| A-B loop | Video herhaalt dezelfde A-B loop |
+
+De video-speler is **stil** (volume 0): al het geluid komt uit LoopMachine
+zelf, zodat audio en beeld altijd synchroon blijven.
+
+### Problemen oplossen
+- **Geen beeld**: controleer het mpv-pad in ⚙ **Setup → Video**.
+- **Video opent niet of foutmelding**: bekijk het logbestand `mpv_native_log.txt`
+  (in de LoopMachine-data-map, naast `session.json`) voor de interne mpv-log.
+
+---
+
+## 4. Waveform & Playback
 
 ### Playback bediening
 | Actie | Toets | Omschrijving |
@@ -71,7 +130,7 @@ Kies hoe stereobestanden naar mono worden gemixed:
 
 ---
 
-## 4. Loops
+## 5. Loops
 
 ### A-B loop maken
 | Methode | Actie |
@@ -117,7 +176,7 @@ Stel een aantal herhalingen in met de "Herhaal:" teller. `0` = oneindig herhalen
 
 ---
 
-## 5. Markers
+## 6. Markers
 
 Markers zijn bladwijzers op de tijdlijn. Er zijn 3 types:
 
@@ -170,7 +229,7 @@ Onder de waveform wordt getoond welke markers op de huidige playhead-positie sta
 
 ---
 
-## 6. Audio Bewerking
+## 7. Audio Bewerking
 
 ### Pitch
 - **Bereik**: -12 tot +12 halve tonen
@@ -196,12 +255,12 @@ Analyseer de A-B selectie op toonhoogtes:
 
 ---
 
-## 7. Setup — Latency & Beat Audit
+## 8. Setup — Latency & Beat Audit
 
 Het setup-venster (⚙ **Setup** in de toolbar) bevat alle instellingen voor
 latency-compensatie, beat-audit, BPM-detectie en marker-beheer.
 
-### 7.1 Latency Kalibratie
+### 8.1 Latency Kalibratie
 
 Als je tijdens het afspelen een marker zet (`B`/`M`/`S`), komt deze **te laat**
 omdat de audio door de SoundTouch-processor en audiokaart-buffer moet. Deze
@@ -221,7 +280,7 @@ vertraging verschilt per computer.
 4. Pas de latency aan tot het flits-ritme en click-ritme synchroon lopen
 5. Tip: begin bij 0 ms en werk omhoog tot je de vertraging ziet
 
-### 7.2 Beat Audit — Kliktrack
+### 8.2 Beat Audit — Kliktrack
 
 Schakel de kliktrack in om te horen waar de beat-markers vallen. De click wordt
 sample-accuraat in de audio gemixed (geen sync-problemen).
@@ -233,7 +292,7 @@ sample-accuraat in de audio gemixed (geen sync-problemen).
 | **Clicks op: Handmatige markers** | Clicks op eigen S/M/B markers |
 | **"🔄 Ververs click-posities"** | Herlaad de click-posities na wijzigingen |
 
-### 7.3 BPM Detectie
+### 8.3 BPM Detectie
 
 #### Detectie-drempel (strength)
 - **Slider**: 0.0–1.0 (stap 0.05)
@@ -246,7 +305,7 @@ sample-accuraat in de audio gemixed (geen sync-problemen).
 - Alleen voor auto-BPM markers (SoundTouch)
 - Positief = beats later, negatief = beats vroeger
 
-### 7.4 Snelacties
+### 8.4 Snelacties
 
 | Actie | Omschrijving |
 |-------|-------------|
@@ -259,7 +318,7 @@ De bulk shift is handig als alle markers structureel te vroeg of te laat blijken
 
 ---
 
-## 8. Export
+## 9. Export
 
 ### Exportvenster openen
 - **Knop**: Klik "📤 Export" in de toolbar (alleen actief als de track loops heeft)
@@ -300,7 +359,7 @@ De bulk shift is handig als alle markers structureel te vroeg of te laat blijken
 
 ---
 
-## 9. Arranger
+## 10. Arranger
 
 De arranger laat je loops in een **sequentie** afspelen.
 
@@ -332,7 +391,7 @@ Dit speelt: loop `a` 2×, loop `b` 1×, loop `c` 3×.
 
 ---
 
-## 10. Shortcuts
+## 11. Shortcuts
 
 ### Overzicht
 Druk op `F1` voor een volledig overzicht van alle sneltoetsen, gegroepeerd per categorie.
@@ -420,7 +479,7 @@ Als je een toets probeert te koppelen die al in gebruik is, wordt een waarschuwi
 
 ---
 
-## 11. Loop Bibliotheek
+## 12. Loop Bibliotheek
 
 ### Alle Tracks venster
 Open met de "📚 Alle Tracks" knop. Hier zie je al je geladen tracks en hun opgeslagen loops.
@@ -436,7 +495,7 @@ Alle loops worden opgeslagen in `library.json`. Dit bestand kun je delen tussen 
 
 ---
 
-## 12. Tips & Tricks
+## 13. Tips & Tricks
 
 ### Workflow: markers → loops
 1. Zet markers op belangrijke posities (S voor secties, M voor maten, B voor beats).
@@ -461,7 +520,7 @@ De editor onthoudt je laatste bestand, positie, zoom, loop-instellingen en pitch
 
 ---
 
-## 13. Toolbar aanpassen
+## 14. Toolbar aanpassen
 
 De actie-werkbalk (onder de bestandstoolbar) is **volledig aanpasbaar**: je kiest zelf welke knoppen verschijnen en in welke volgorde.
 
@@ -525,7 +584,7 @@ Je toolbar-configuratie wordt opgeslagen in `session.json` en is dus na een hers
 
 ---
 
-## 14. Toetsenreferentie (snelzoekkaart)
+## 15. Toetsenreferentie (snelzoekkaart)
 
 ```
 PLAYBACK
