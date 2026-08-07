@@ -156,6 +156,10 @@ pub struct LoopEditorApp {
     pub file_loading: bool,
     /// Ontvanger voor het resultaat van de laad-thread.
     file_load_rx: Option<mpsc::Receiver<LoadFileResult>>,
+    /// Sessie-state die ná de eerste asynchrone bestandslading moet worden
+    /// toegepast (startup-herstel van zoom/loop/positie). Zonder dit wist
+    /// `check_file_load` de herstelde waarden met standaardwaarden.
+    restore_session_after_load: Option<SessionState>,
 }
 
 /// Momentopname van de muteerbare editor state (voor undo/redo).
@@ -310,6 +314,7 @@ impl LoopEditorApp {
             video_player: None,
             file_loading: false,
             file_load_rx: None,
+            restore_session_after_load: None,
             follow_playhead: false,
         };
 
@@ -334,6 +339,10 @@ impl LoopEditorApp {
             if let Some(ref path) = session.file_path {
                 if Path::new(path).exists() {
                     app.file_path = path.clone();
+                    // Onthoud de sessie-waarden: `check_file_load` past ze toe
+                    // zodra de asynchrone bestandslading klaar is (anders worden
+                    // zoom/loop/positie overschreven met standaardwaarden).
+                    app.restore_session_after_load = Some(session.clone());
                     app.load_file(path);
                 }
             }
@@ -532,13 +541,30 @@ impl LoopEditorApp {
                 self.waveform_state.sample_rate = sample_rate;
                 self.waveform_state.summary = Some(summary);
                 self.waveform_state.duration_secs = duration_secs;
-                self.waveform_state.zoom = 50.0;
-                self.waveform_state.scroll_offset = 0.0;
-                self.waveform_state.loop_a_secs = None;
-                self.waveform_state.loop_b_secs = None;
                 self.waveform_state.error = None;
-                self.waveform_play_position = 0.0;
                 self.waveform_play_duration = duration_secs;
+
+                // Startup-herstel: pas de sessie-waarden toe in plaats van
+                // standaardwaarden, zodat de app herstart waar de gebruiker
+                // gebleven was (zoom, scroll, A-B loop, play-positie).
+                if let Some(session) = self.restore_session_after_load.take() {
+                    self.waveform_state.zoom = session.zoom;
+                    self.waveform_state.scroll_offset = session.scroll_offset;
+                    self.waveform_state.loop_a_secs = session.loop_a_secs;
+                    self.waveform_state.loop_b_secs = session.loop_b_secs;
+                    self.waveform_play_position = session.play_position;
+                    self.waveform_state.pitch_semitones = session.pitch_semitones;
+                    self.waveform_state.tempo = session.tempo;
+                    self.waveform_state.volume = session.volume;
+                    // Zorg dat de audio-thread de herstelde loop kent
+                    self.sync_loop_bounds();
+                } else {
+                    self.waveform_state.zoom = 50.0;
+                    self.waveform_state.scroll_offset = 0.0;
+                    self.waveform_state.loop_a_secs = None;
+                    self.waveform_state.loop_b_secs = None;
+                    self.waveform_play_position = 0.0;
+                }
 
                 // Herstel markers uit de bibliotheek
                 let track = self.library.track_for_path(path);
@@ -1033,6 +1059,12 @@ impl LoopEditorApp {
 }
 
 impl eframe::App for LoopEditorApp {
+    /// Sla de sessie op bij afsluiten, zodat de app herstart waar de
+    /// gebruiker gebleven was (laatste file, loop, zoom, positie).
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_session();
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check of een asynchrone bestandslading voltooid is
         self.check_file_load();
