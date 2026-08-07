@@ -490,6 +490,22 @@ Open met de "📚 Alle Tracks" knop. Hier zie je al je geladen tracks en hun opg
 | `▶` bij loop | Laad die specifieke loop |
 | `❌` | Verwijder loop (met bevestiging) |
 
+### Missende bestanden herlinken (relink)
+Staat een bestand op een externe schijf die een andere stationsletter heeft
+gekregen (bijv. `H:` → `L:`), of is het naar een heel andere plek verplaatst,
+dan toont de track "⛔ Bestand niet gevonden". Je kunt het bestand dan
+opnieuw koppelen (relinken):
+
+| Situatie | Oplossing |
+|----------|-----------|
+| **Alleen stationsletter gewijzigd** (zelfde pad, andere schijf) | De app zoekt automatisch alle stationsletters af. Wordt er precies één kandidaat gevonden, dan klik je **"💡 Gebruik station X"** — de track wordt gefixt en dezelfde stationswissel wordt ook op andere missende tracks met die stationsletter toegepast. |
+| **Bestand staat op een heel andere plek** | Klik **"🔗 Relink…"** en kies het bestand op de nieuwe locatie in de bestandsdialoog. |
+
+- Vindt de app meerdere schijven met hetzelfde pad, dan wordt **geen** suggestie
+getoond (om een verkeerde keuze te voorkomen) — gebruik dan "🔗 Relink…".
+- Het nieuwe pad wordt direct opgeslagen in `library.json`, dus de koppeling
+blijft bewaard na een herstart.
+
 ### Library bestand
 Alle loops worden opgeslagen in `library.json`. Dit bestand kun je delen tussen sessies.
 
