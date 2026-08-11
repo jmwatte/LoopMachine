@@ -13,3 +13,6 @@ Cargo.lock
 session.json
 library.json
 loops.json
+
+# Windows device name (per ongeluk aangemaakt door omleiding)
+nul
