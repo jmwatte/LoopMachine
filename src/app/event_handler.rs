@@ -260,6 +260,7 @@ impl LoopEditorApp {
                 self.send_cmd(WaveformCommand::SetPractice {
                     enabled: self.practice_mode,
                     dim_volume: self.practice_dim_volume,
+                    clicks_audible: self.practice_clicks,
                 });
                 self.status_message = if self.practice_mode {
                     "Oefenmodus aan: 1e loop vol, 2e loop gedimd".to_string()

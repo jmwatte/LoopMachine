@@ -528,6 +528,22 @@ impl LoopEditorApp {
         };
 
         *self.click_positions.lock().unwrap() = positions;
+
+        // Fallback: als de gekozen bron niets oplevert (bv. nog geen BPM-detectie
+        // gedraaid terwijl "Auto-BPM beats" is geselecteerd), gebruik dan de
+        // handmatige markers zodat er altijd clicks horen.
+        let markers: Vec<f32> = self
+            .waveform_state
+            .markers
+            .iter()
+            .map(|m| m.position_secs)
+            .collect();
+        if !markers.is_empty() && self.click_positions.lock().unwrap().is_empty() {
+            self.status_message =
+                "Geen BPM-beats gevonden — clicks op handmatige markers".to_string();
+            self.status_message_timer = 3 * 60;
+            *self.click_positions.lock().unwrap() = markers;
+        }
     }
 
     /// Schakel de beat-audit modus aan/uit.

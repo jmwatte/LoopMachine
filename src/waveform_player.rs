@@ -43,6 +43,8 @@ pub enum WaveformCommand {
     SetPractice {
         enabled: bool,
         dim_volume: f32,
+        /// Beat-audit clicks ook hoorbaar tijdens de gedimde iteraties.
+        clicks_audible: bool,
     },
     /// Speel een hele sequentie in één keer af (gapless, fire & forget).
     PlaySequence {
@@ -158,6 +160,7 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
     let volume: Arc<AtomicU32> = Arc::new(AtomicU32::new(f32::to_bits(1.0)));
     let practice_on: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let practice_dim: Arc<AtomicU32> = Arc::new(AtomicU32::new(f32::to_bits(0.0)));
+    let practice_clicks: Arc<AtomicBool> = Arc::new(AtomicBool::new(true));
 
     // Watchdog: detecteert als source_pos niet meer verandert (audio-device weggevallen)
     let mut last_source_pos: u64 = f64::to_bits(0.0);
@@ -235,6 +238,7 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                         volume.clone(),
                         practice_on.clone(),
                         practice_dim.clone(),
+                        practice_clicks.clone(),
                         incoming_clicks.clone(),
                         incoming_enabled.clone(),
                     );
@@ -349,9 +353,11 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                 WaveformCommand::SetPractice {
                     enabled,
                     dim_volume,
+                    clicks_audible,
                 } => {
                     practice_on.store(enabled, Ordering::Relaxed);
                     practice_dim.store(f32::to_bits(dim_volume), Ordering::Relaxed);
+                    practice_clicks.store(clicks_audible, Ordering::Relaxed);
                 }
                 WaveformCommand::SetLoopEnabled(enabled) => {
                     loop_bounds.lock().unwrap().enabled = enabled;
@@ -546,6 +552,8 @@ struct SoundTouchSource {
     practice_on: Arc<AtomicBool>,
     /// Volume voor de gedimde iteraties (0.0 = stil).
     practice_dim: Arc<AtomicU32>,
+    /// Clicks ook hoorbaar tijdens de gedimde iteraties.
+    practice_clicks: Arc<AtomicBool>,
     /// Huidige loop-iteratie (0 = eerste keer, 1 = tweede keer, ...).
     loop_iteration: u32,
     ts: TimeStretch,
@@ -567,6 +575,8 @@ struct SoundTouchSource {
     // ── Click/audit generatie ──
     click_positions: Arc<Mutex<Vec<f32>>>,
     click_enabled: Arc<AtomicBool>,
+    /// Click-waveform per sample van de huidige out_buf (0.0 = geen click).
+    click_buf: Vec<f32>,
 }
 
 // ───────────────────────────────────────────────
@@ -780,6 +790,7 @@ impl SoundTouchSource {
         volume: Arc<AtomicU32>,
         practice_on: Arc<AtomicBool>,
         practice_dim: Arc<AtomicU32>,
+        practice_clicks: Arc<AtomicBool>,
         click_positions: Arc<Mutex<Vec<f32>>>,
         click_enabled: Arc<AtomicBool>,
     ) -> Self {
@@ -818,6 +829,7 @@ impl SoundTouchSource {
             volume,
             practice_on,
             practice_dim,
+            practice_clicks,
             loop_iteration: 0,
             ts,
             read_pos: start_pos,
@@ -834,8 +846,10 @@ impl SoundTouchSource {
             input_chunk: Vec::with_capacity(4096),
             temp_out: vec![0.0; 4096],
             flush_buf: vec![0.0; 4096],
+            // ── Click/audit generatie ──
             click_positions,
             click_enabled,
+            click_buf: Vec::with_capacity(4096),
         }
     }
 
@@ -937,9 +951,11 @@ impl SoundTouchSource {
         }
 
         // ── Click-generatie voor beat audit ──
-        // Mix clicks direct in de output buffer op de marker-posities.
-        // Omdat dit NA SoundTouch gebeurt maar VOOR rodio's buffering,
-        // zijn de clicks sample-accuraat synced met de audio.
+        // De clicks worden NIET in out_buf gemixed maar apart in click_buf gezet,
+        // zodat ze in `next()` ná de oefenmodus-gain kunnen worden toegevoegd
+        // (clicks blijven dan hoorbaar tijdens de stille ronde, als gekozen).
+        self.click_buf.clear();
+        self.click_buf.resize(self.out_buf.len(), 0.0);
         if self.click_enabled.load(Ordering::Relaxed) && !self.out_buf.is_empty() {
             let sr = self.sample_rate as f64;
             let tempo = self.cached_tempo;
@@ -974,9 +990,8 @@ impl SoundTouchSource {
                     }
                     let t = j as f64 / sr;
                     let click_sample_val = (t * 1000.0 * 2.0 * std::f64::consts::PI).sin() as f32;
-                    // Click op 40% volume, gemixed met bestaande audio
-                    self.out_buf[buf_pos] =
-                        (self.out_buf[buf_pos] + click_sample_val * 0.4).clamp(-1.0, 1.0);
+                    // Click op 40% volume (wordt later bij de audio opgeteld)
+                    self.click_buf[buf_pos] += click_sample_val * 0.4;
                 }
             }
         }
@@ -1023,13 +1038,31 @@ impl Iterator for SoundTouchSource {
             }
             // Oefenmodus: tel de wraps en dim de even iteraties (2e, 4e, ...)
             self.loop_iteration = self.loop_iteration.wrapping_add(wrapped);
+            let practice_on = self.practice_on.load(Ordering::Relaxed);
             let gain = practice_gain(
                 self.loop_iteration,
-                self.practice_on.load(Ordering::Relaxed),
+                practice_on,
                 self.cached_loop_enabled,
                 f32::from_bits(self.practice_dim.load(Ordering::Relaxed)),
             );
-            let val = apply_volume_soft_clip(raw_val * gain, &self.volume);
+
+            let click_val = if self.out_idx < self.click_buf.len() {
+                self.click_buf[self.out_idx]
+            } else {
+                0.0
+            };
+            // Clicks blijven hoorbaar tijdens de stille ronde als dat gekozen
+            // is; anders dimmen ze mee met de audio.
+            let keep_clicks = !practice_on || self.practice_clicks.load(Ordering::Relaxed);
+            let mut val = if keep_clicks {
+                apply_volume_soft_clip(raw_val * gain, &self.volume)
+            } else {
+                apply_volume_soft_clip((raw_val + click_val) * gain, &self.volume)
+            };
+            if keep_clicks && click_val != 0.0 {
+                let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
+                val = (val + click_val * vol).clamp(-1.0, 1.0);
+            }
             self.out_idx += 1;
 
             self.source_pos

@@ -83,6 +83,8 @@ pub struct LoopEditorApp {
     pub practice_mode: bool,
     /// Volume voor de gedimde iteraties in oefenmodus (0.0 = stil).
     pub practice_dim_volume: f32,
+    /// Beat-audit clicks ook hoorbaar tijdens de gedimde iteraties.
+    pub practice_clicks: bool,
 
     // Shortcuts
     pub shortcuts: ShortcutsConfig,
@@ -250,6 +252,7 @@ impl LoopEditorApp {
             loop_iteration_count: 0,
             practice_mode: false,
             practice_dim_volume: 0.0,
+            practice_clicks: true,
             shortcuts,
             show_shortcut_editor: false,
             listening_for_action: None,
@@ -1485,6 +1488,22 @@ impl eframe::App for LoopEditorApp {
                                     self.send_cmd(WaveformCommand::SetPractice {
                                         enabled: true,
                                         dim_volume: self.practice_dim_volume,
+                                        clicks_audible: self.practice_clicks,
+                                    });
+                                }
+                                let old_clicks = self.practice_clicks;
+                                ui.checkbox(
+                                    &mut self.practice_clicks,
+                                    "Clicks hoorbaar tijdens stilte",
+                                )
+                                .on_hover_text(
+                                    "Beat-audit clicks blijven ook in de stille ronde hoorbaar (bijv. om ritme mee te oefenen)",
+                                );
+                                if self.practice_clicks != old_clicks {
+                                    self.send_cmd(WaveformCommand::SetPractice {
+                                        enabled: true,
+                                        dim_volume: self.practice_dim_volume,
+                                        clicks_audible: self.practice_clicks,
                                     });
                                 }
                             }
@@ -1492,6 +1511,7 @@ impl eframe::App for LoopEditorApp {
                                 self.send_cmd(WaveformCommand::SetPractice {
                                     enabled: self.practice_mode,
                                     dim_volume: self.practice_dim_volume,
+                                    clicks_audible: self.practice_clicks,
                                 });
                                 self.status_message = if self.practice_mode {
                                     "Oefenmodus aan: 1e loop vol, 2e loop gedimd".to_string()

@@ -169,6 +169,7 @@ Handig om mee te oefenen: de loop speelt de **1e keer op vol volume** en de
 |-------|-------------|
 | **"🎯 Oefenmodus"** knop of toets `P` | Schakel de oefenmodus aan/uit (naast de Herhaal-teller) |
 | **"Gedimd: X%"** | Volume van de gedimde ronde (0% = volledig stil, tot 50%) |
+| **"Clicks hoorbaar tijdens stilte"** | Laat de beat-audit clicks ook in de stille ronde horen (handig om het ritme te blijven horen) |
 
 Bij 0% hoor je dus alleen de eerste ronde en speel jij zelf de tweede mee.
 De oefenmodus werkt alleen als er een A-B loop staat.
@@ -303,6 +304,10 @@ sample-accuraat in de audio gemixed (geen sync-problemen).
 | **Clicks op: Auto-BPM beats** | Clicks op SoundTouch BPM-detectie resultaten |
 | **Clicks op: Handmatige markers** | Clicks op eigen S/M/B markers |
 | **"🔄 Ververs click-posities"** | Herlaad de click-posities na wijzigingen |
+
+Staat de bron op "Auto-BPM beats" maar is er (nog) geen detectie gedraaid,
+dan valt de app automatisch terug op je handmatige markers — je hoort dan
+altijd clicks zodra er markers zijn.
 
 ### 8.3 BPM Detectie
 
