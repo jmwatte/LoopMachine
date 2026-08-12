@@ -251,6 +251,25 @@ impl LoopEditorApp {
                 }
             }
 
+            // ── Oefenmodus (P): 1e loop-iteratie vol, 2e gedimd ──
+            if self
+                .shortcuts
+                .is_pressed(ShortcutAction::TogglePractice, &ctx.input(|i| i.clone()))
+            {
+                self.practice_mode = !self.practice_mode;
+                self.send_cmd(WaveformCommand::SetPractice {
+                    enabled: self.practice_mode,
+                    dim_volume: self.practice_dim_volume,
+                });
+                self.status_message = if self.practice_mode {
+                    "Oefenmodus aan: 1e loop vol, 2e loop gedimd".to_string()
+                } else {
+                    "Oefenmodus uit".to_string()
+                };
+                self.status_message_timer = 3 * 60;
+                ctx.request_repaint();
+            }
+
             // ── Marker shortcuts (1-9), Backspace (verwijder dichtstbijzijnde), [ ] (A-B) ──
             if self.waveform_state.path.is_some() {
                 // ── Marker shortcuts: S (Section), M (Measure), B (Beat) ──

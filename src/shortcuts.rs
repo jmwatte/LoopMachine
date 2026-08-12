@@ -234,6 +234,8 @@ pub enum ShortcutAction {
     NudgePlayheadRight,
     CenterLoop,
     SaveLoop,
+    /// Oefenmodus: wissel volume per loop-iteratie (1e vol, 2e gedimd).
+    TogglePractice,
 
     // Markers
     AddSectionMarker,
@@ -295,6 +297,7 @@ impl ShortcutAction {
             Self::NudgePlayheadRight => "Nudge playhead right",
             Self::CenterLoop => "Center view on loop",
             Self::SaveLoop => "Save current loop",
+            Self::TogglePractice => "Toggle practice mode",
             Self::AddSectionMarker => "Toggle section marker (S)",
             Self::AddMeasureMarker => "Toggle measure marker (M)",
             Self::AddBeatMarker => "Toggle beat marker (B)",
@@ -352,7 +355,8 @@ impl ShortcutAction {
             | Self::DoubleLoopLength
             | Self::HalveLoopLength
             | Self::SnapLoopLeft
-            | Self::SnapLoopRight => "Loop",
+            | Self::SnapLoopRight
+            | Self::TogglePractice => "Loop",
             Self::AddSectionMarker
             | Self::AddMeasureMarker
             | Self::AddBeatMarker
@@ -418,6 +422,7 @@ impl ShortcutAction {
             Self::RestartLoop,
             Self::CenterLoop,
             Self::SaveLoop,
+            Self::TogglePractice,
             Self::DoubleLoopLength,
             Self::HalveLoopLength,
             Self::SnapLoopLeft,
@@ -926,6 +931,10 @@ impl Default for ShortcutsConfig {
             KeyBinding::new(SerializableKey::S).with_ctrl(),
         );
         bindings.insert(
+            ShortcutAction::TogglePractice,
+            KeyBinding::new(SerializableKey::P),
+        );
+        bindings.insert(
             ShortcutAction::ExportLoops,
             KeyBinding::new(SerializableKey::E).with_ctrl(),
         );
@@ -1224,21 +1233,22 @@ mod tests {
     #[test]
     fn test_shortcuts_config_find_conflict() {
         let mut config = ShortcutsConfig::default();
-        let binding = KeyBinding::new(SerializableKey::P);
+        // N is niet gebonden aan een default, dus geschikt als conflict-sleutel
+        let binding = KeyBinding::new(SerializableKey::N);
         config
             .set_binding(ShortcutAction::PlayPause, binding)
             .unwrap();
 
         // Zoek conflict met een andere actie die dezelfde binding probeert te gebruiken
         let conflict = config.find_conflict(
-            &KeyBinding::new(SerializableKey::P),
+            &KeyBinding::new(SerializableKey::N),
             ShortcutAction::ExportLoops,
         );
         assert_eq!(conflict, Some(ShortcutAction::PlayPause));
 
         // Test dat conflict-detectie de exclude respecteert
         let no_conflict = config.find_conflict(
-            &KeyBinding::new(SerializableKey::P),
+            &KeyBinding::new(SerializableKey::N),
             ShortcutAction::PlayPause,
         );
         assert_ne!(no_conflict, Some(ShortcutAction::PlayPause));

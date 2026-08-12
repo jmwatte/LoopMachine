@@ -39,6 +39,11 @@ pub enum WaveformCommand {
     SetTempo(f32),
     SetVolume(f32),
     SetLoopEnabled(bool),
+    /// Oefenmodus: wissel het volume per loop-iteratie af (1e = vol, 2e = gedimd).
+    SetPractice {
+        enabled: bool,
+        dim_volume: f32,
+    },
     /// Speel een hele sequentie in één keer af (gapless, fire & forget).
     PlaySequence {
         sequence_steps: Vec<SequenceStep>,
@@ -151,6 +156,8 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
     let seek_requested: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let seek_target: Arc<AtomicU64> = Arc::new(AtomicU64::new(f64::to_bits(0.0)));
     let volume: Arc<AtomicU32> = Arc::new(AtomicU32::new(f32::to_bits(1.0)));
+    let practice_on: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let practice_dim: Arc<AtomicU32> = Arc::new(AtomicU32::new(f32::to_bits(0.0)));
 
     // Watchdog: detecteert als source_pos niet meer verandert (audio-device weggevallen)
     let mut last_source_pos: u64 = f64::to_bits(0.0);
@@ -226,6 +233,8 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                         seek_requested.clone(),
                         seek_target.clone(),
                         volume.clone(),
+                        practice_on.clone(),
+                        practice_dim.clone(),
                         incoming_clicks.clone(),
                         incoming_enabled.clone(),
                     );
@@ -336,6 +345,13 @@ fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEv
                 }
                 WaveformCommand::SetVolume(new_volume) => {
                     volume.store(f32::to_bits(new_volume), Ordering::Relaxed);
+                }
+                WaveformCommand::SetPractice {
+                    enabled,
+                    dim_volume,
+                } => {
+                    practice_on.store(enabled, Ordering::Relaxed);
+                    practice_dim.store(f32::to_bits(dim_volume), Ordering::Relaxed);
                 }
                 WaveformCommand::SetLoopEnabled(enabled) => {
                     loop_bounds.lock().unwrap().enabled = enabled;
@@ -506,6 +522,16 @@ fn apply_volume_soft_clip(raw_val: f32, volume: &Arc<AtomicU32>) -> f32 {
     val
 }
 
+/// Bepaal de versterkingsfactor voor oefenmodus: oneven iteraties (1e, 3e, ...)
+/// spelen op vol volume, even iteraties (2e, 4e, ...) op het gedimde volume.
+fn practice_gain(iteration: u32, practice_on: bool, loop_enabled: bool, dim_volume: f32) -> f32 {
+    if practice_on && loop_enabled && iteration % 2 == 1 {
+        dim_volume
+    } else {
+        1.0
+    }
+}
+
 struct SoundTouchSource {
     raw_samples: Arc<Vec<f32>>,
     sample_rate: u32,
@@ -516,6 +542,12 @@ struct SoundTouchSource {
     seek_requested: Arc<AtomicBool>,
     seek_target: Arc<AtomicU64>,
     volume: Arc<AtomicU32>,
+    /// Oefenmodus aan/uit.
+    practice_on: Arc<AtomicBool>,
+    /// Volume voor de gedimde iteraties (0.0 = stil).
+    practice_dim: Arc<AtomicU32>,
+    /// Huidige loop-iteratie (0 = eerste keer, 1 = tweede keer, ...).
+    loop_iteration: u32,
     ts: TimeStretch,
     read_pos: usize,
     out_buf: Vec<f32>,
@@ -656,7 +688,9 @@ impl SequenceSource {
                 if repeats > 1 {
                     self.sequence[step_idx].repeats -= 1;
                     self.read_pos = self.sequence[step_idx].start_sample;
-                    let _ = self.step_event_tx.send(WaveformEvent::StepRepeated(step_idx));
+                    let _ = self
+                        .step_event_tx
+                        .send(WaveformEvent::StepRepeated(step_idx));
                     continue;
                 }
                 if step_idx + 1 < self.sequence.len() {
@@ -666,7 +700,9 @@ impl SequenceSource {
                     self.read_pos = self.sequence[next_idx].start_sample;
                     self.sample_rate = self.sequence[next_idx].sample_rate;
                     self.ts.clear();
-                    let _ = self.step_event_tx.send(WaveformEvent::StepChanged(next_idx));
+                    let _ = self
+                        .step_event_tx
+                        .send(WaveformEvent::StepChanged(next_idx));
                     continue;
                 }
                 // Einde arrangement
@@ -742,6 +778,8 @@ impl SoundTouchSource {
         seek_requested: Arc<AtomicBool>,
         seek_target: Arc<AtomicU64>,
         volume: Arc<AtomicU32>,
+        practice_on: Arc<AtomicBool>,
+        practice_dim: Arc<AtomicU32>,
         click_positions: Arc<Mutex<Vec<f32>>>,
         click_enabled: Arc<AtomicBool>,
     ) -> Self {
@@ -778,6 +816,9 @@ impl SoundTouchSource {
             seek_requested,
             seek_target,
             volume,
+            practice_on,
+            practice_dim,
+            loop_iteration: 0,
             ts,
             read_pos: start_pos,
             out_buf: Vec::with_capacity(4096),
@@ -809,6 +850,7 @@ impl SoundTouchSource {
             self.ts.clear();
             self.out_buf.clear();
             self.out_idx = 0;
+            self.loop_iteration = 0;
         }
 
         update_pitch_tempo(
@@ -957,10 +999,10 @@ impl Iterator for SoundTouchSource {
 
         if self.out_idx < self.out_buf.len() {
             let raw_val = self.out_buf[self.out_idx];
-            let val = apply_volume_soft_clip(raw_val, &self.volume);
-            self.out_idx += 1;
+
             // ✅ Positie accumuleren en wrappen — subtractie ipv modulo
             self.current_audio_pos += self.cached_tempo;
+            let mut wrapped = 0u32;
             {
                 let bounds = self.loop_bounds.lock().unwrap();
                 if bounds.enabled() {
@@ -971,6 +1013,7 @@ impl Iterator for SoundTouchSource {
                     if loop_dur > 0.0 {
                         while self.current_audio_pos >= loop_end {
                             self.current_audio_pos -= loop_dur;
+                            wrapped += 1;
                         }
                         if self.current_audio_pos < loop_start {
                             self.current_audio_pos = loop_start;
@@ -978,6 +1021,17 @@ impl Iterator for SoundTouchSource {
                     }
                 }
             }
+            // Oefenmodus: tel de wraps en dim de even iteraties (2e, 4e, ...)
+            self.loop_iteration = self.loop_iteration.wrapping_add(wrapped);
+            let gain = practice_gain(
+                self.loop_iteration,
+                self.practice_on.load(Ordering::Relaxed),
+                self.cached_loop_enabled,
+                f32::from_bits(self.practice_dim.load(Ordering::Relaxed)),
+            );
+            let val = apply_volume_soft_clip(raw_val * gain, &self.volume);
+            self.out_idx += 1;
+
             self.source_pos
                 .store(f64::to_bits(self.current_audio_pos), Ordering::Relaxed);
 
@@ -1000,5 +1054,29 @@ impl Source for SoundTouchSource {
     }
     fn total_duration(&self) -> Option<Duration> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_practice_gain_alternates() {
+        assert_eq!(practice_gain(0, true, true, 0.0), 1.0); // 1e keer vol
+        assert_eq!(practice_gain(1, true, true, 0.0), 0.0); // 2e keer stil
+        assert_eq!(practice_gain(2, true, true, 0.0), 1.0); // 3e keer vol
+        assert_eq!(practice_gain(3, true, true, 0.0), 0.0); // 4e keer stil
+    }
+
+    #[test]
+    fn test_practice_gain_off_or_no_loop() {
+        assert_eq!(practice_gain(1, false, true, 0.0), 1.0); // modus uit
+        assert_eq!(practice_gain(1, true, false, 0.0), 1.0); // geen loop
+    }
+
+    #[test]
+    fn test_practice_gain_dim_value() {
+        assert_eq!(practice_gain(1, true, true, 0.15), 0.15);
     }
 }

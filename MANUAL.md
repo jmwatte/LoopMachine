@@ -161,6 +161,18 @@ zelf, zodat audio en beeld altijd synchroon blijven.
 ### Herhaal telling
 Stel een aantal herhalingen in met de "Herhaal:" teller. `0` = oneindig herhalen.
 
+### Oefenmodus (call & response)
+Handig om mee te oefenen: de loop speelt de **1e keer op vol volume** en de
+**2e keer gedimd of stil** — daarna afwisselend (3e keer vol, 4e keer stil, ...).
+
+| Actie | Omschrijving |
+|-------|-------------|
+| **"🎯 Oefenmodus"** knop of toets `P` | Schakel de oefenmodus aan/uit (naast de Herhaal-teller) |
+| **"Gedimd: X%"** | Volume van de gedimde ronde (0% = volledig stil, tot 50%) |
+
+Bij 0% hoor je dus alleen de eerste ronde en speel jij zelf de tweede mee.
+De oefenmodus werkt alleen als er een A-B loop staat.
+
 ### Loop opslaan
 - **Knop**: Klik "💾 Save Loop"
 - **Shortcut**: `Ctrl+S`
@@ -443,6 +455,7 @@ Als je een toets probeert te koppelen die al in gebruik is, wordt een waarschuwi
 | **Loop halveren** | `Ctrl+Shift+D` |
 | **Snap naar marker links** | `Q` |
 | **Snap naar marker rechts** | `W` |
+| **Oefenmodus toggle** | `P` |
 
 #### Markers
 | Actie | Toets |
@@ -629,6 +642,7 @@ Ctrl+D         Loop verdubbelen
 Ctrl+Shift+D   Loop halveren
 Q              Snap naar marker links
 W              Snap naar marker rechts
+P              Oefenmodus toggle (1e keer vol, 2e keer stil)
 
 MARKERS
 ─────────────────────────────────────────

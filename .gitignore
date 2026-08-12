@@ -16,3 +16,9 @@ loops.json
 
 # Windows device name (per ongeluk aangemaakt door omleiding)
 nul
+
+# Test-/logartefacten (lokaal)
+test_output.txt
+test_stderr.txt
+test_stdout.txt
+mpv_error.log

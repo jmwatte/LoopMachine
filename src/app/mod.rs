@@ -79,6 +79,10 @@ pub struct LoopEditorApp {
     // Loop herhaal-teller
     pub loop_repeat_count: u32,    // 0 = oneindig
     pub loop_iteration_count: u32, // interne teller, reset bij elke Play
+    /// Oefenmodus: 1e loop-iteratie op vol volume, even iteraties gedimd.
+    pub practice_mode: bool,
+    /// Volume voor de gedimde iteraties in oefenmodus (0.0 = stil).
+    pub practice_dim_volume: f32,
 
     // Shortcuts
     pub shortcuts: ShortcutsConfig,
@@ -244,6 +248,8 @@ impl LoopEditorApp {
             loop_bypassed: false,
             loop_repeat_count: 0,
             loop_iteration_count: 0,
+            practice_mode: false,
+            practice_dim_volume: 0.0,
             shortcuts,
             show_shortcut_editor: false,
             listening_for_action: None,
@@ -1430,7 +1436,7 @@ impl eframe::App for LoopEditorApp {
                     }
                 }
 
-                // ── Loop herhaal-teller ──
+                // ── Loop herhaal-teller + oefenmodus ──
                 if let (Some(a), Some(b)) = (
                     self.waveform_state.loop_a_secs,
                     self.waveform_state.loop_b_secs,
@@ -1452,6 +1458,47 @@ impl eframe::App for LoopEditorApp {
                             if self.loop_repeat_count > 0 && self.waveform_is_playing {
                                 let display = self.loop_iteration_count.min(self.loop_repeat_count);
                                 ui.label(format!("({}/{})", display, self.loop_repeat_count));
+                            }
+
+                            // ── Oefenmodus: 1e keer vol, 2e keer gedimd ──
+                            ui.separator();
+                            let old_practice = self.practice_mode;
+                            if ui
+                                .selectable_label(self.practice_mode, "🎯 Oefenmodus")
+                                .on_hover_text(
+                                    "Eerste loop-ronde op vol volume, tweede ronde gedimd of stil — zo kun je meespelen",
+                                )
+                                .clicked()
+                            {
+                                self.practice_mode = !self.practice_mode;
+                            }
+                            if self.practice_mode {
+                                ui.label("Gedimd:");
+                                let mut pct = (self.practice_dim_volume * 100.0).round() as u32;
+                                let resp = ui.add(
+                                    egui::DragValue::new(&mut pct)
+                                        .range(0..=50)
+                                        .suffix("%"),
+                                );
+                                if resp.changed() {
+                                    self.practice_dim_volume = pct as f32 / 100.0;
+                                    self.send_cmd(WaveformCommand::SetPractice {
+                                        enabled: true,
+                                        dim_volume: self.practice_dim_volume,
+                                    });
+                                }
+                            }
+                            if self.practice_mode != old_practice {
+                                self.send_cmd(WaveformCommand::SetPractice {
+                                    enabled: self.practice_mode,
+                                    dim_volume: self.practice_dim_volume,
+                                });
+                                self.status_message = if self.practice_mode {
+                                    "Oefenmodus aan: 1e loop vol, 2e loop gedimd".to_string()
+                                } else {
+                                    "Oefenmodus uit".to_string()
+                                };
+                                self.status_message_timer = 3 * 60;
                             }
                         });
                     }
