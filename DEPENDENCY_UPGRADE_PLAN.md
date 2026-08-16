@@ -39,21 +39,23 @@ dezelfde oude versies als JukeBox destijds: eframe 0.28 en rodio 0.19.
 
 ## Fase 0 — Voorbereiding
 
-- [ ] `Cargo.lock` uit `.gitignore` halen en committen (was ook bij JukeBox de basis voor
+- [x] `Cargo.lock` uit `.gitignore` halen en committen (was ook bij JukeBox de basis voor
       reproduceerbare builds en traceerbare upgrades).
       Commit: `Commit Cargo.lock for reproducible builds`
 
 ## Fase 1 — Audio-kern: rodio 0.19 → 0.22
 
-- [ ] `src/waveform_player.rs` migreren:
+- [x] `src/waveform_player.rs` migreren:
   - `OutputStream::try_default()` + `Sink::try_new(&handle)` →
     `DeviceSinkBuilder::open_default_sink()` + `Player::connect_new(handle.mixer())`
   - `Option<OutputStream>` / `Option<Sink>` → `Option<MixerDeviceSink>` / `Option<Player>`
   - `stop`, `clear`, `is_paused`, `pause`, `play`, `empty`, `append` bestaan op `Player`
     onder dezelfde namen (geen `try_seek`-gebruik in dit bestand)
-  - `SequenceSource`: check dat de `Source`-impl voldoet aan de f32-samples-API van 0.21+
-- [ ] Validatie: `cargo build` (incl. rubberband-feature!), `cargo test` als er tests zijn
-- [ ] Commit: `Upgrade rodio to 0.22`
+  - `SequenceSource`/`SoundTouchSource`: `current_frame_len` → `current_span_len`,
+    `channels()` → `NonZeroU16`, `sample_rate()` → `NonZeroU32` (rodio 0.21+ API);
+    samples waren al `f32` — geen Item-wijziging nodig
+- [x] Validatie: `cargo build` (incl. rubberband-feature!), 61/61 tests groen
+- [x] Commit: `Upgrade rodio to 0.22`
 
 ## Fase 2 — UI-sprong: eframe/egui_extras 0.28 → 0.36 + egui-file-dialog 0.6 → 0.15
 
