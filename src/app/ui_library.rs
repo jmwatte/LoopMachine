@@ -233,7 +233,7 @@ impl LoopEditorApp {
                     // ── Verwerk relink-operaties ──
                     if let Some(ti) = relink_op {
                         self.pending_relink_track = Some(ti);
-                        self.relink_dialog.select_file();
+                        self.relink_dialog.pick_file();
                     }
                     if let Some((ti, new_path)) = drive_swap_op {
                         self.apply_relink(ti, &new_path);

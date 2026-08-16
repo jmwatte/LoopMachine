@@ -1014,7 +1014,7 @@ impl LoopEditorApp {
                 .shortcuts
                 .is_pressed(ShortcutAction::OpenFile, &ctx.input(|i| i.clone()))
             {
-                self.file_dialog.select_file();
+                self.file_dialog.pick_file();
             }
 
             // Undo
@@ -1201,11 +1201,7 @@ impl LoopEditorApp {
     pub(crate) fn handle_drag_drop(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if !dropped.is_empty() {
-            if let Some(path) = dropped
-                .first()
-                .and_then(|f| f.path.as_ref())
-                .and_then(|p| p.to_str())
-            {
+            if let Some(path) = dropped.first().map(|f| f.path()).and_then(|p| p.to_str()) {
                 self.file_path = path.to_string();
                 self.load_file(path);
             }

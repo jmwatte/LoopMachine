@@ -262,7 +262,7 @@ impl LoopEditorApp {
             file_dialog: FileDialog::new()
                 .add_file_filter(
                     "Audio / Video",
-                    std::sync::Arc::new(|p: &std::path::Path| {
+                    egui_file_dialog::Filter::new(|p: &std::path::Path| {
                         matches!(
                             p.extension().and_then(|s| s.to_str()),
                             Some(
@@ -288,7 +288,7 @@ impl LoopEditorApp {
             relink_dialog: FileDialog::new()
                 .add_file_filter(
                     "Audio / Video",
-                    std::sync::Arc::new(|p: &std::path::Path| {
+                    egui_file_dialog::Filter::new(|p: &std::path::Path| {
                         matches!(
                             p.extension().and_then(|s| s.to_str()),
                             Some(
@@ -325,7 +325,7 @@ impl LoopEditorApp {
             export_dialog: FileDialog::new()
                 .add_file_filter(
                     "WAV Audio (*.wav)",
-                    std::sync::Arc::new(|p: &std::path::Path| {
+                    egui_file_dialog::Filter::new(|p: &std::path::Path| {
                         p.extension().and_then(|s| s.to_str()) == Some("wav")
                     }),
                 )
@@ -1142,26 +1142,28 @@ impl LoopEditorApp {
 impl eframe::App for LoopEditorApp {
     /// Sla de sessie op bij afsluiten, zodat de app herstart waar de
     /// gebruiker gebleven was (laatste file, loop, zoom, positie).
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self) {
         self.save_session();
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         // Check of een asynchrone bestandslading voltooid is
         self.check_file_load();
 
-        self.handle_waveform_events(ctx);
+        self.handle_waveform_events(&ctx);
         self.update_follow_playhead();
-        self.housekeeping(ctx);
-        self.handle_keyboard_shortcuts(ctx);
-        self.handle_drag_drop(ctx);
+        self.housekeeping(&ctx);
+        self.handle_keyboard_shortcuts(&ctx);
+        self.handle_drag_drop(&ctx);
 
-        self.show_file_toolbar(ctx);
-        self.show_action_toolbar(ctx);
-        self.show_shortcuts_help(ctx);
+        self.show_file_toolbar(ui);
+        self.show_action_toolbar(ui);
+        self.show_shortcuts_help(&ctx);
 
         // ── Hoofdpaneel ──
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let panel_width = ui.available_width().max(100.0);
             self.last_panel_width = panel_width;
             ui.separator();
@@ -1754,7 +1756,7 @@ impl eframe::App for LoopEditorApp {
                                         .size(13.0)
                                         .color(Color32::from_rgb(r, g, b)),
                                 );
-                                let _ = egui::Frame::none().fill(Color32::from_rgb(r, g, b)).show(
+                                let _ = egui::Frame::NONE.fill(Color32::from_rgb(r, g, b)).show(
                                     ui,
                                     |ui| {
                                         ui.set_min_size(egui::vec2(bar_width.max(2.0), 12.0));
@@ -1937,14 +1939,14 @@ impl eframe::App for LoopEditorApp {
             }); // end ScrollArea
         }); // end CentralPanel.show()
 
-        self.show_library_window(ctx);
-        self.show_confirm_delete(ctx);
-        self.show_shortcut_editor(ctx);
-        self.show_setup_window(ctx);
+        self.show_library_window(&ctx);
+        self.show_confirm_delete(&ctx);
+        self.show_shortcut_editor(&ctx);
+        self.show_setup_window(&ctx);
         // ── File dialog (egui-native, geen Windows COM issues) ──
-        self.file_dialog.update(ctx);
+        self.file_dialog.update(ui);
 
-        if let Some(path) = self.file_dialog.take_selected() {
+        if let Some(path) = self.file_dialog.take_picked() {
             let raw = path.to_string_lossy();
             // Strip \? prefix that Windows file dialogs sometimes add
             let prefix = "\\?\\\\";
@@ -1965,8 +1967,8 @@ impl eframe::App for LoopEditorApp {
         }
 
         // ── Relink-dialog (missende track naar nieuw pad) ──
-        self.relink_dialog.update(ctx);
-        if let Some(path) = self.relink_dialog.take_selected() {
+        self.relink_dialog.update(ui);
+        if let Some(path) = self.relink_dialog.take_picked() {
             let raw = path.to_string_lossy();
             // Strip \? prefix dat Windows file dialogs soms toevoegen
             let prefix = "\\?\\";
@@ -2007,7 +2009,7 @@ impl eframe::App for LoopEditorApp {
                 .id(egui::Id::new("export_window"))
                 .resizable(true)
                 .default_size([500.0, 420.0])
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.label(
                             RichText::new(format!("🎵 {}", track_label))
@@ -2064,7 +2066,7 @@ impl eframe::App for LoopEditorApp {
                         ui.horizontal(|ui| {
                             ui.label("Formaat:");
                             let fmt = &mut self.export_state.format;
-                            egui::ComboBox::from_id_source("export_format")
+                            egui::ComboBox::from_id_salt("export_format")
                                 .selected_text("WAV (.wav)")
                                 .show_ui(ui, |ui| {
                                     if ui
@@ -2141,25 +2143,25 @@ impl eframe::App for LoopEditorApp {
                         self.export_dialog.save_file();
                     }
                     ExportMode::Separate => {
-                        self.export_dialog.select_directory();
+                        self.export_dialog.pick_directory();
                     }
                 }
             }
         }
 
         // ── Export dialog processing ──
-        self.export_dialog.update(ctx);
+        self.export_dialog.update(ui);
 
         if self.export_pending.is_some() {
             let mode = self.export_pending.as_ref().unwrap().mode;
             let path_opt = match mode {
-                ExportMode::Combined => self.export_dialog.take_selected(),
-                ExportMode::Separate => self.export_dialog.take_selected(),
+                ExportMode::Combined => self.export_dialog.take_picked(),
+                ExportMode::Separate => self.export_dialog.take_picked(),
             };
 
             if path_opt.is_some() {
                 // User confirmed — handled below
-            } else if self.export_dialog.state() != egui_file_dialog::DialogState::Open {
+            } else if *self.export_dialog.state() != egui_file_dialog::DialogState::Open {
                 // Dialog was closed without selection
                 self.export_pending = None;
             }
@@ -2181,6 +2183,6 @@ impl eframe::App for LoopEditorApp {
         }
 
         // ── Arranger window ──
-        self.show_arranger_ui(ctx);
+        self.show_arranger_ui(&ctx);
     }
 }

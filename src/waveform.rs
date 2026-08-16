@@ -596,6 +596,7 @@ pub fn render_waveform(
                     highlight_rect,
                     3.0,
                     egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 160, 255)),
+                    egui::StrokeKind::Inside,
                 );
             }
 
@@ -801,7 +802,7 @@ pub fn render_waveform(
                     marker_zone_rect.top() + 22.0,
                 ),
             );
-            let resp = ui.allocate_ui_at_rect(edit_rect, |ui| {
+            let resp = ui.scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut state.editing_marker_name).desired_width(120.0),
                 )
@@ -1292,7 +1293,7 @@ pub fn render_waveform(
     // Zoom met muiswiel
     if response.hovered() {
         ui.ctx().input(|i| {
-            let scroll = i.raw_scroll_delta.y;
+            let scroll = i.smooth_scroll_delta.y;
             if scroll != 0.0 {
                 let mouse_x = i
                     .pointer

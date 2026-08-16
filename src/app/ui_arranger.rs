@@ -35,7 +35,7 @@ impl LoopEditorApp {
                         .map(|a| a.name.clone())
                         .unwrap_or_default();
 
-                    egui::ComboBox::from_id_source("arrangement_select")
+                    egui::ComboBox::from_id_salt("arrangement_select")
                         .selected_text(sel_name)
                         .show_ui(ui, |ui| {
                             for (i, arr) in self.arrangements.iter().enumerate() {
@@ -126,7 +126,7 @@ impl LoopEditorApp {
 
                     egui::ScrollArea::vertical()
                         .max_height(180.0)
-                        .id_source("arr_steps")
+                        .id_salt("arr_steps")
                         .show(ui, |ui| {
                             for (i, (id, tpath, color, repeats, pitch, tempo)) in
                                 steps_data.iter().enumerate()
@@ -144,9 +144,9 @@ impl LoopEditorApp {
                                 let step_pitch = *pitch;
                                 let step_tempo = *tempo;
 
-                                egui::Frame::none().fill(bg).show(ui, |ui| {
+                                egui::Frame::NONE.fill(bg).show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        let _ = egui::Frame::none().fill(c).show(ui, |ui| {
+                                        let _ = egui::Frame::NONE.fill(c).show(ui, |ui| {
                                             ui.set_min_size(egui::vec2(12.0, 12.0));
                                         });
 
@@ -334,7 +334,7 @@ impl LoopEditorApp {
                     // ── Voeg toe ──
                     ui.label("Toevoegen:");
                     egui::ScrollArea::vertical()
-                        .id_source("arr_add_loops")
+                        .id_salt("arr_add_loops")
                         .max_height(150.0)
                         .show(ui, |ui| {
                             ui.horizontal_wrapped(|ui| {

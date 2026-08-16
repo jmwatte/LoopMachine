@@ -65,7 +65,8 @@ fn main() -> Result<(), eframe::Error> {
                 "DejaVuSansMono".to_string(),
                 eframe::egui::FontData::from_static(include_bytes!(
                     "../vendor/fonts/DejaVuSansMono.ttf"
-                )),
+                ))
+                .into(),
             );
 
             if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {

@@ -264,7 +264,7 @@ impl LoopEditorApp {
                     let mut remove_idx: Option<usize> = None;
 
                     egui::ScrollArea::vertical()
-                        .id_source("toolbar_editor_scroll")
+                        .id_salt("toolbar_editor_scroll")
                         .show(ui, |ui| {
                             ui.label(
                                 RichText::new("Actieve knoppen (geordend):")
@@ -390,19 +390,19 @@ impl LoopEditorApp {
     }
 
     /// Render de bovenste werkbalk (bestand openen, kanaalmodus, etc.)
-    pub(crate) fn show_file_toolbar(&mut self, ctx: &egui::Context) {
+    pub(crate) fn show_file_toolbar(&mut self, ui: &mut egui::Ui) {
         use crate::waveform::ChannelMode;
 
-        egui::TopBottomPanel::top("file_toolbar").show(ctx, |ui| {
+        egui::Panel::top("file_toolbar").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if ui.button("\u{1F4C2} Open bestand").clicked() {
-                    self.file_dialog.select_file();
+                    self.file_dialog.pick_file();
                 }
 
                 // Kanaal modus dropdown
                 let old_mode = self.waveform_state.channel_mode;
-                egui::ComboBox::from_id_source("channel_mode")
+                egui::ComboBox::from_id_salt("channel_mode")
                     .selected_text(old_mode.display())
                     .show_ui(ui, |ui| {
                         for &mode in &[
@@ -498,8 +498,8 @@ impl LoopEditorApp {
     }
 
     /// Render de actie-werkbalk (onderste toolbar met knoppen).
-    pub(crate) fn show_action_toolbar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("action_toolbar").show(ctx, |ui| {
+    pub(crate) fn show_action_toolbar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::top("action_toolbar").show(ui, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 // Dynamische toolbar: loop over de geconfigureerde knoppen
@@ -538,20 +538,20 @@ impl LoopEditorApp {
                     ui.menu_button("✕ Wis markers", |ui| {
                         if ui.button("Alle markers").clicked() {
                             self.clear_markers_by_kind(None);
-                            ui.close_menu();
+                            ui.close();
                         }
                         ui.separator();
                         if ui.button("Beat-markers (B)").clicked() {
                             self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Beat));
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui.button("Maat-markers (M)").clicked() {
                             self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Measure));
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui.button("Sectie-markers (S)").clicked() {
                             self.clear_markers_by_kind(Some(crate::waveform::MarkerKind::Section));
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                 }
@@ -581,7 +581,7 @@ impl LoopEditorApp {
 
         // ── Toolbar editor venster ──
         if self.show_toolbar_editor {
-            self.show_toolbar_editor_window(ctx);
+            self.show_toolbar_editor_window(ui.ctx());
         }
     }
 }
