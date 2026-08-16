@@ -59,20 +59,31 @@ dezelfde oude versies als JukeBox destijds: eframe 0.28 en rodio 0.19.
 
 ## Fase 2 — UI-sprong: eframe/egui_extras 0.28 → 0.36 + egui-file-dialog 0.6 → 0.15
 
-- [ ] `eframe::App::update(ctx, frame)` → `App::ui(ui, frame)` + `let ctx = ui.ctx().clone();`
-- [ ] Panels: `SidePanel`/`TopBottomPanel` → `Panel::left/right/top/bottom`;
-      `CentralPanel::show(ctx, …)` → `.show(ui, …)`; `Window::show(ctx, …)` → `.show(&ctx, …)`
-- [ ] Hernoemingen: `default_width` → `default_size`, `id_source` → `id_salt`,
-      `child_ui` → `new_child(UiBuilder)`, `wants_keyboard_input` → `egui_wants_keyboard_input`,
-      `raw_scroll_delta` → `smooth_scroll_delta`, `SelectableLabel::new` → `Button::new(…).selected(…)`,
-      `ctx.run` → `ctx.run_ui` (tests), `FullOutput.textures_delta.clear()` in test-helpers
-- [ ] `egui-file-dialog` 0.6 → 0.15: de 3 dialogs (`file_dialog`, `relink_dialog`,
-      `export_dialog`) omzetten van `dialog.update(ctx)` naar het widget-patroon
-      (`ui.add(dialog)` / `FileDialog::open_file()`, `save_file()`, `select_directory()`,
-      `take_selected()` — exacte 0.15-API bij migratie raadplegen)
-- [ ] Validatie: `cargo build` (rubberband-feature aan!), `cargo test`, release-build,
-      handmatige test (waveform, loops, export, video, dialogs)
-- [ ] Commit: `Upgrade eframe and egui_extras to 0.36`
+- [x] `eframe::App::update(ctx, frame)` → `App::ui(ui, frame)` + `let ctx = ui.ctx().clone();`
+- [x] Panels: `TopBottomPanel::top` → `Panel::top` (`show_file_toolbar`/`show_action_toolbar`
+      kregen een `ui`-parameter); `CentralPanel::show(ctx, …)` → `.show(ui, …)`;
+      `Window::show(ctx, …)` → `.show(&ctx, …)`; alle overige `show_*`-functies (windows)
+      konden `ctx` houden
+- [x] `on_exit(_gl)` → `on_exit()` (glow-renderer is uit in eframe 0.36)
+- [x] Hernoemingen: `id_source` → `id_salt`, `ComboBox::from_id_source` → `from_id_salt`,
+      `Frame::none()` → `Frame::NONE`, `ui.close_menu()` → `ui.close()`,
+      `allocate_ui_at_rect` → `scope_builder(UiBuilder::new().max_rect(…))`,
+      `rect_stroke(…, stroke)` → + `StrokeKind::Inside`, `raw_scroll_delta` →
+      `smooth_scroll_delta`, `FontData::from_static(…)` → `.into()` (Arc),
+      `DroppedFile::path` (veld) → `path()` (methode)
+- [x] egui-file-dialog 0.6 → 0.15: `update(ctx)` → `update(ui)`, `take_selected()` →
+      `take_picked()`, `select_file()` → `pick_file()`, `select_directory()` →
+      `pick_directory()`, `state()` → `*state()` (geeft nu `&DialogState`),
+      `add_file_filter(name, Arc::new(closure))` → `add_file_filter(name, Filter::new(closure))`
+- [x] Validatie: 61/61 tests groen, build + release-build (incl. rubberband-feature) ok
+- [x] Commit: `Upgrade eframe, egui_extras and egui-file-dialog`
+
+## Fase 3 — Afronding
+
+- [ ] Laatste volledige check: `cargo build --release` (met default features incl. rubberband),
+      geen waarschuwingen, handmatige smoke-test
+- [ ] `Cargo.toml` opschonen: commentaar actueel maken
+- [ ] Commit: `Clean up Cargo.toml after dependency updates`
 
 ## Fase 3 — Afronding
 
