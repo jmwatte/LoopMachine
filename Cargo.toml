@@ -23,7 +23,7 @@ eframe = "0.28"
 egui_extras = { version = "0.28", features = ["all_loaders"] }
 
 # --- Audio Weergave & Decodering ---
-rodio = { version = "0.19", features = ["symphonia-all"] }
+rodio = { version = "0.22", features = ["symphonia-all"] }
 symphonia = "0.5"
 
 # --- Serialisatie ---

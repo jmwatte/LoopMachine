@@ -1,6 +1,7 @@
 use crate::timestretch::TimeStretch;
 use crossbeam_channel::{Receiver, Sender};
-use rodio::{OutputStream, Sink, Source};
+use rodio::{Player, Source};
+use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -92,22 +93,17 @@ pub fn start_waveform_thread() -> (Sender<WaveformCommand>, Receiver<WaveformEve
 
 // ─── Helper: maak een verse OutputStream + Sink aan ───
 fn recreate_stream(
-    stream: &mut Option<OutputStream>,
-    sink: &mut Option<Sink>,
+    stream: &mut Option<rodio::MixerDeviceSink>,
+    sink: &mut Option<Player>,
     event_tx: &Sender<WaveformEvent>,
 ) -> bool {
-    match OutputStream::try_default() {
-        Ok((new_stream, handle)) => match Sink::try_new(&handle) {
-            Ok(new_sink) => {
-                *stream = Some(new_stream);
-                *sink = Some(new_sink);
-                true
-            }
-            Err(e) => {
-                let _ = event_tx.send(WaveformEvent::Error(format!("Sink fout: {}", e)));
-                false
-            }
-        },
+    match rodio::DeviceSinkBuilder::open_default_sink() {
+        Ok(handle) => {
+            let new_player = Player::connect_new(handle.mixer());
+            *stream = Some(handle);
+            *sink = Some(new_player);
+            true
+        }
         Err(e) => {
             let _ = event_tx.send(WaveformEvent::Error(format!("Audio-apparaat fout: {}", e)));
             false
@@ -117,8 +113,8 @@ fn recreate_stream(
 
 // ─── Helper: herbouw de stream alleen als nodig (lazy) ───
 fn check_and_recreate_stream(
-    stream: &mut Option<OutputStream>,
-    sink: &mut Option<Sink>,
+    stream: &mut Option<rodio::MixerDeviceSink>,
+    sink: &mut Option<Player>,
     event_tx: &Sender<WaveformEvent>,
     last_activity: &mut std::time::Instant,
     stream_is_dead: &mut bool,
@@ -142,8 +138,8 @@ fn check_and_recreate_stream(
 }
 
 fn run_waveform_audio(rx: Receiver<WaveformCommand>, event_tx: Sender<WaveformEvent>) {
-    let mut _stream: Option<OutputStream> = None;
-    let mut sink: Option<Sink> = None;
+    let mut _stream: Option<rodio::MixerDeviceSink> = None;
+    let mut sink: Option<Player> = None;
     let mut is_playing = false;
     let mut is_paused = false;
     let mut samples: Arc<Vec<f32>> = Arc::new(Vec::new());
@@ -759,14 +755,14 @@ impl Iterator for SequenceSource {
 }
 
 impl Source for SequenceSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         Some(usize::MAX)
     }
-    fn channels(&self) -> u16 {
-        1
+    fn channels(&self) -> NonZeroU16 {
+        NonZeroU16::new(1).unwrap()
     }
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> NonZeroU32 {
+        NonZeroU32::new(self.sample_rate).unwrap()
     }
     fn total_duration(&self) -> Option<Duration> {
         None
@@ -1076,14 +1072,14 @@ impl Iterator for SoundTouchSource {
 }
 
 impl Source for SoundTouchSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         Some(usize::MAX)
     }
-    fn channels(&self) -> u16 {
-        1
+    fn channels(&self) -> NonZeroU16 {
+        NonZeroU16::new(1).unwrap()
     }
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> NonZeroU32 {
+        NonZeroU32::new(self.sample_rate).unwrap()
     }
     fn total_duration(&self) -> Option<Duration> {
         None
